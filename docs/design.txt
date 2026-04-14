@@ -1,0 +1,567 @@
+architecture
+    api
+    scheduler
+        - due-job loop
+        - dispatch loop
+        - worker goroutine
+
+resource
+    sqlite
+        - source of truth
+        - jobs / runs / run_events
+
+    image source
+        - local
+        - remote
+
+
+api spec
+    - job
+        - read
+            - readOne
+            - readPaging
+        - create/update
+            - enabled
+            - sourceType : local, remote
+            - imageRef
+            - type : interval, cron
+                - cron : expr
+                - interval : sec
+            - parameter : run parameter
+            - concurrencyPolicy : allow / forbid
+            - retry : 0~
+            - timeoutSec
+
+    - run
+        - read
+            - readOne
+            - readPaging
+
+
+scheduler logic
+    - due-job loop
+        - interval check (or api update wake up)
+        - due job check
+        - insert new run to sqlite
+
+    - dispatch loop
+        - interval check
+        - due-job loop wake up
+        - worker complete wake up
+        - pending run check
+        - assign run to worker goroutine
+
+    - worker goroutine
+        - run status update
+        - image resolve / pull
+        - container run
+        - stdout/stderr log write
+        - exit code / timeout handling
+        - final status update
+
+
+schema
+    - job
+        CREATE TABLE jobs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name            TEXT NOT NULL UNIQUE,
+            description     TEXT,
+
+            enabled         INTEGER NOT NULL DEFAULT 1, -- 0=false, 1=true
+
+            -- image
+            source_type     TEXT NOT NULL, -- 'local' | 'remote'
+            image_ref       TEXT NOT NULL, -- ex) repo/image:tag
+            image_digest    TEXT,          -- optional (resolved sha)
+
+            -- schedule
+            schedule_type   TEXT NOT NULL, -- 'cron' | 'interval'
+            schedule_expr   TEXT,          -- cron expression
+            interval_sec    INTEGER,       -- interval (seconds)
+
+            timezone        TEXT DEFAULT 'UTC',
+
+            -- execution policy
+            concurrency_policy TEXT NOT NULL DEFAULT 'forbid', 
+                -- 'allow' | 'forbid'
+
+            timeout_sec     INTEGER DEFAULT 0,   -- 0 = no timeout
+            retry_limit     INTEGER DEFAULT 0,
+
+            -- next scheduling
+            next_run_at     DATETIME,
+            last_scheduled_at DATETIME,
+
+            -- parameters
+            params_json     TEXT,  -- JSON string
+
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    - run
+        CREATE TABLE runs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            job_id          INTEGER NOT NULL,
+
+            scheduled_at    DATETIME NOT NULL,  -- 원래 실행돼야 했던 시각
+            started_at      DATETIME,
+            finished_at     DATETIME,
+
+            status          TEXT NOT NULL,
+                -- 'pending'
+                -- 'running'
+                -- 'cancelling'  -- cancel 요청 수신, worker 처리 대기 중
+                -- 'success'
+                -- 'failed'
+                -- 'timeout'
+                -- 'cancelled'
+
+            attempt         INTEGER NOT NULL DEFAULT 0,
+
+            exit_code       INTEGER,
+            error_message   TEXT,
+
+            log_path        TEXT,
+            result_path     TEXT,
+
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+            UNIQUE(job_id, scheduled_at, attempt)
+        );
+    - run_events
+        CREATE TABLE run_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            run_id      INTEGER NOT NULL,
+
+            event_type  TEXT NOT NULL,
+                -- 'created'
+                -- 'dispatched'
+                -- 'started'
+                -- 'completed'
+                -- 'failed'
+                -- 'timeout'
+                -- 'cancelled'
+
+            message     TEXT,
+
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+        );
+    - index
+        -- job 스케줄링
+        CREATE INDEX idx_jobs_next_run ON jobs(next_run_at);
+
+        -- run dispatch
+        CREATE INDEX idx_runs_status ON runs(status);
+        CREATE INDEX idx_runs_pending ON runs(status, scheduled_at);
+
+        -- run 조회
+        CREATE INDEX idx_runs_job ON runs(job_id);
+
+        -- event 조회
+        CREATE INDEX idx_events_run ON run_events(run_id);
+
+
+api endpoint
+    - job
+        - GET /api/v1/jobs (job paging 조회)
+            - parameter
+                - page: number (default=1)
+                - size: number (default=20)
+                - enabled: boolean (optional)
+                - scheduleType: cron | interval (optional)
+                - name: string (optional)
+
+        - GET /api/v1/jobs/{jobId} (job 단건 조회)
+            - parameter
+                - jobId: number (path)
+
+        - GET /api/v1/jobs/{jobId}/runs (job 기준 run paging 조회)
+            - parameter
+                - jobId: number (path)
+                - page: number (default=1)
+                - size: number (default=20)
+                - status: pending | running | success | failed | timeout | cancelled (optional)
+
+        - POST /api/v1/jobs (job 생성)
+            - parameter (body)
+                - name: string
+                - enabled: boolean
+                - sourceType: local | remote
+                - imageRef: string
+                - scheduleType: cron | interval
+                - scheduleExpr: string (cron일 때)
+                - intervalSec: number (interval일 때)
+                - params: object (optional)
+                - concurrencyPolicy: allow | forbid
+                - retryLimit: number (0~)
+                - timeoutSec: number
+
+        - PUT /api/v1/jobs/{jobId} (job 수정)
+            - parameter
+                - jobId: number (path)
+            - parameter (body)
+                - name: string
+                - enabled: boolean
+                - sourceType: local | remote
+                - imageRef: string
+                - scheduleType: cron | interval
+                - scheduleExpr: string (cron일 때)
+                - intervalSec: number (interval일 때)
+                - params: object (optional)
+                - concurrencyPolicy: allow | forbid
+                - retryLimit: number
+                - timeoutSec: number
+
+        - DELETE /api/v1/jobs/{jobId} (job 삭제)
+            - parameter
+                - jobId: number (path)
+
+        - POST /api/v1/jobs/{jobId}/trigger (job 즉시 실행)
+            - parameter
+                - jobId: number (path)
+            - parameter (body)
+                - reason: string (optional)
+            - note
+                - 생성되는 run 의 scheduled_at 은 actual now (time.Now() UTC)
+    - run
+        - GET /api/v1/runs (run paging 조회)
+            - parameter
+                - page: number (default=1)
+                - size: number (default=20)
+                - jobId: number (optional)
+                - status: pending | running | success | failed | timeout | cancelled (optional)
+                - from: datetime (optional)
+                - to: datetime (optional)
+
+        - GET /api/v1/runs/{runId} (run 단건 조회)
+            - parameter
+                - runId: number (path)
+
+        - POST /api/v1/runs/{runId}/cancel (run 취소)
+            - parameter
+                - runId: number (path)
+
+        - GET /api/v1/runs/{runId}/events (run 이벤트 조회)
+            - parameter
+                - runId: number (path)
+
+        - GET /api/v1/runs/{runId}/logs (run 로그 조회)
+            - parameter
+                - runId: number (path)
+                - offset: number (optional)
+                - limit: number (optional)
+                - tail: number (optional)
+    - images
+        - GET /api/v1/images (이미지 후보 조회)
+            - parameter
+                - sourceType: local | remote
+                - q: string (optional)
+                - prefix: string (optional)
+
+        - GET /api/v1/images/{sourceType}/candidates (source 별 이미지 후보 조회)
+            - parameter
+                - sourceType: local | remote (path)
+                - q: string (optional)
+                - prefix: string (optional)
+
+        - GET /api/v1/images/resolve (이미지 검증/해석)
+            - parameter
+                - sourceType: local | remote
+                - imageRef: string
+
+
+code layer
+    cmd/
+        main.go
+
+    internal/
+        api/
+            handler/
+                job_handler.go
+                run_handler.go
+                image_handler.go
+            router.go
+            ui/
+                ui_handler.go
+                page_job.go
+                page_job_detail.go
+                page_run_detail.go
+                page_image_select.go
+                templates/
+                    layout.html
+                    jobs.html
+                    job_detail.html
+                    run_detail.html
+                    image_select.html
+                static/
+                    app.css
+                    app.js
+
+        config/
+            config.go           -- 전체 config struct
+            loader.go           -- yaml/env load
+            validate.go         -- config validation
+
+        scheduler/
+            scheduler.go        -- 전체 orchestration
+            due_job.go          -- due job loop
+            dispatch.go         -- dispatch loop
+            worker.go           -- worker goroutine
+
+        store/
+            db.go               -- sqlite init
+            job_repo.go
+            run_repo.go
+            event_repo.go
+
+        model/
+            job.go
+            run.go
+            run_event.go
+
+        image/
+            source.go           -- interface 느낌
+            local.go
+            remote.go
+
+        executor/
+            docker.go           -- container 실행
+
+        log/
+            writer.go           -- stdout/stderr file write
+
+
+screen
+    - job 화면 (/jobs)
+        - job 목록
+            - enabled 여부
+            - schedule
+            - imageRef
+            - 마지막 실행 상태
+            - 생성/수정/삭제
+            - 즉시 실행
+            - 이름 검색
+            - enabled 필터
+            - scheduleType 필터
+        - related api
+            - GET /jobs
+            - POST /jobs
+            - PUT /jobs/{jobId}
+            - DELETE /jobs/{jobId}
+            - POST /jobs/{jobId}/trigger
+        - related code layer
+            - internal/api/ui/page_job.go
+            - internal/api/handler/job_handler.go
+
+    - job 상세 화면 (/jobs/{jobId})
+        - job 기본 정보
+            - name
+            - description
+            - enabled
+            - sourceType
+            - imageRef
+            - scheduleType
+            - scheduleExpr | intervalSec
+            - concurrencyPolicy
+            - retryLimit
+            - timeoutSec
+            - params
+        - 최근 run 목록
+            - scheduledAt
+            - startedAt
+            - finishedAt
+            - status
+            - exitCode
+        - 액션
+            - 수정
+            - 삭제
+            - 즉시 실행
+        - related api
+            - GET /api/v1/jobs/{jobId}
+            - GET /api/v1/jobs/{jobId}/runs
+            - PUT /api/v1/jobs/{jobId}
+            - DELETE /api/v1/jobs/{jobId}
+            - POST /api/v1/jobs/{jobId}/trigger
+        - related code layer
+            - internal/api/ui/page_job_detail.go
+            - internal/api/handler/job_handler.go
+            - internal/api/handler/run_handler.go
+
+    - run 상세 화면 (/runs/{runId})
+        - run 기본 정보
+            - jobId
+            - scheduledAt
+            - startedAt
+            - finishedAt
+            - status
+            - attempt
+            - exitCode
+            - errorMessage
+        - run 이벤트 목록
+        - 로그 조회
+            - tail
+            - offset / limit 기반 조회
+        - 액션
+            - 취소
+        - related api
+            - GET /api/v1/runs/{runId}
+            - GET /api/v1/runs/{runId}/events
+            - GET /api/v1/runs/{runId}/logs
+            - POST /api/v1/runs/{runId}/cancel
+        - related code layer
+            - internal/api/ui/page_run_detail.go
+            - internal/api/handler/run_handler.go
+
+    - image 선택 화면 (/images/select)
+        - sourceType 선택
+            - local | remote
+        - 이미지 후보 목록
+            - imageRef
+            - digest(optional)
+        - 검색 / prefix 필터
+        - 선택 결과를 job 생성/수정 화면에 반영
+        - related api
+            - GET /api/v1/images
+            - GET /api/v1/images/{sourceType}/candidates
+            - GET /api/v1/images/resolve
+        - related code layer
+            - internal/api/ui/page_image_select.go
+            - internal/api/handler/image_handler.go
+            - internal/image/local.go
+            - internal/image/remote.go
+
+
+config
+    server:
+        host: 0.0.0.0
+        port: 8080
+
+    store:
+        sqlite_path: /data/app.db
+        log_root: /data/logs
+        artifact_root: /data/artifacts
+
+    scheduler:
+        due_job_scan_interval_sec: 2
+        dispatch_scan_interval_sec: 1
+        max_concurrent_runs: 3
+
+    image:
+        allowed_sources:
+            - local
+            - remote
+        default_source: local
+        pull_policy: if_not_present
+        allowed_prefixes:
+            - jobs/
+        remote:
+            endpoint: http://registry:5000
+            insecure: true
+
+    ui:
+        title: my task scheduler
+
+policy
+    run generation
+        - DB time 저장 기준은 UTC
+        - UI 표시 기준은 config.ui / app timezone 기준
+        - scheduler 는 due job check 시 next_run_at <= now 인 job 을 대상으로 run 생성
+        - run 생성 기준 시각은 actual now 가 아니라 scheduled_at
+        - runs 는 (job_id, scheduled_at, attempt) 기준으로 중복 생성되지 않아야 함
+          → DB 레벨 UNIQUE(job_id, scheduled_at, attempt) 제약으로 보장
+        - retry 없는 기본 run 은 attempt=0
+        - run INSERT 와 next_run_at 갱신은 하나의 트랜잭션으로 처리 (원자성 보장)
+        - manual trigger 로 생성된 run 의 scheduled_at 은 actual now (time.Now() UTC)
+        - next_run_at 은 job 생성/수정 시 API handler 가 계산하여 DB에 저장
+          (스케줄러 재시작 시 next_run_at 이 이미 설정된 상태로 동작)
+
+    catch-up
+        - 서버 재시작 후 missed schedule 에 대한 기본 정책은 catch-up 하지 않음
+        - 단, manual trigger 는 즉시 run 생성 가능
+        - 향후 필요 시 catch-up policy (none | latest | all) 확장 가능하도록 고려
+
+    concurrency
+        - 기본 concurrencyPolicy 는 forbid
+        - forbid 인 경우 running run 이 존재하면 새 due 시점에 run 을 생성하지 않음
+          → skip 된 슬롯은 버리고 next_run_at 을 다음 슬롯으로 진행
+        - allow 인 경우 scheduled_at 기준으로 독립 run 생성 가능
+
+    dispatch
+        - dispatch loop 는 channel wakeup + periodic fallback scan 을 함께 사용
+        - channel 은 wakeup hint 이며 source of truth 는 sqlite
+        - worker complete 후 dispatch wakeup 발생
+        - due-job loop 에서 run 생성 후 dispatch wakeup 발생
+        - POST /trigger 로 run 생성 후 dispatch wakeup 발생
+        - dispatcher 는 max_concurrent_runs 범위 내에서만 worker goroutine 실행
+
+    timeout / retry
+        - timeoutSec=0 은 no timeout
+        - timeout 발생 시 run status 는 timeout
+        - retryLimit > 0 인 경우 실패 / timeout 에 대해 재시도 가능
+        - 재시도 run 은 동일 scheduled_at 을 유지하고 attempt 만 증가
+
+    logging
+        - job observability 의 기본 채널은 stdout / stderr
+        - worker 는 stdout / stderr 를 run 별 로그 파일로 저장
+        - DB 에는 log_path 및 메타데이터만 저장하고 로그 본문 전체는 저장하지 않음
+        - structured result 는 optional result_path / artifact 로 확장 가능
+
+    image source
+        - image create / push 책임은 프로그램 외부에 있음
+        - 프로그램은 local / remote source 의 후보 조회, 검증, 실행만 책임짐
+        - remote source 는 registry endpoint 설정 차이로 취급
+        - 실행 가능한 image 는 allowed_sources 및 allowed_prefixes 정책을 따라야 함        - allowed_prefixes 는 local / remote 모두에 적용
+    docker execution
+        - 기본 pull_policy 는 if_not_present
+        - worker 는 image resolve / pull 후 container run 수행
+        - run 종료 후 container 는 정리(remove) 한다
+        - 초단위 고빈도 작업 최적화를 위한 warm container reuse 는 MVP 범위에서 제외
+
+    cancel
+        - API cancel 요청 → runs.status 를 'cancelling' 으로 업데이트
+        - worker 는 주기적으로 runs.status 를 확인하여 'cancelling' 감지 시 container stop → remove 후 'cancelled' 로 마킹
+        - pending 상태의 run 은 container 없음 → status 를 'cancelled' 로 바로 업데이트
+
+    graceful shutdown
+        - 서버 종료 시 모든 worker goroutine 에 context cancel 전달
+        - 각 worker 는 실행 중인 container 를 stop → remove 하고 run status 를 cancelled 로 마킹
+        - scheduler 는 모든 worker 가 완료된 후 종료
+
+    config
+        - config 우선순위는 default < yaml < env override
+        - job level 설정은 DB(job) 에 저장
+        - app level 설정은 config 파일/env 에 저장
+
+    api
+        - UI route 와 API route 는 분리
+        - API prefix 는 /api/v1
+        - HTML 응답은 ui handler, JSON 응답은 api handler 가 담당
+
+    job 삭제
+        - hard delete 적용 (DB에서 완전 제거)
+        - 연관된 runs, run_events 는 ON DELETE CASCADE 로 자동 삭제
+        - 삭제 후 재등록은 자유롭게 가능 (이미지 삭제와 완전히 독립)
+        - 실행 중인 run 이 있을 때 job 삭제 시도도 거부 없이 삭제
+          (worker 는 실행 후 run 업데이트 시도 실패에 대한 graceful 처리 필요)
+
+    store
+        - SQLite 연결 시 PRAGMA journal_mode=WAL 활성화 (API 서버 + scheduler 동시 접근 대비)
+        - store/db.go 초기화 시 적용
+
+    logging
+        - run 상세 화면에서 실행 중인 run 의 로그는 클라이언트 폴링으로 조회
+          (일정 주기로 GET /api/v1/runs/{runId}/logs 재요청, offset 기반 증분 조회)
+
+    scope
+        - 단일 바이너리 + 단일 호스트 + sqlite + docker.sock 기반을 MVP 범위로 함
+        - worker / orchestrator 프로세스 분리, embedded registry 내장, multi-node 확장은 MVP 범위에서 제외
+
+
+
