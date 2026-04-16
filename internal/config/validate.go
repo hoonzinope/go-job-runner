@@ -38,5 +38,21 @@ func (c *Config) Validate() error {
 		log.Printf("Scheduler max_concurrent_runs must be > 0")
 		return fmt.Errorf("scheduler max_concurrent_runs must be > 0")
 	}
+	if len(c.Image.AllowedSources) == 0 {
+		log.Printf("Image allowed_sources is required")
+		return fmt.Errorf("image allowed_sources is required")
+	}
+	if c.Image.DefaultSource == "" {
+		log.Printf("Image default_source is required")
+		return fmt.Errorf("image default_source is required")
+	}
+	if c.Image.PullPolicy == "" {
+		log.Printf("Image pull_policy is required")
+		return fmt.Errorf("image pull_policy is required")
+	}
+	if c.Image.Remote.Endpoint == "" {
+		log.Printf("Image remote.endpoint is required")
+		return fmt.Errorf("image remote.endpoint is required")
+	}
 	return nil
 }

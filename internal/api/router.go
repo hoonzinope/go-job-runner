@@ -9,23 +9,26 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hoonzinope/go-job-runner/internal/api/handler"
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/image"
 	"github.com/hoonzinope/go-job-runner/internal/scheduler"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type APIServer struct {
-	Host      string
-	Port      int
-	Store     *store.Store
-	Scheduler *scheduler.Scheduler
+	Host          string
+	Port          int
+	Store         *store.Store
+	Scheduler     *scheduler.Scheduler
+	ImageResolver *image.Resolver
 }
 
 func NewAPIServer(cfg *config.Config, st *store.Store, sch *scheduler.Scheduler) *APIServer {
 	return &APIServer{
-		Host:      cfg.Server.Host,
-		Port:      cfg.Server.Port,
-		Store:     st,
-		Scheduler: sch,
+		Host:          cfg.Server.Host,
+		Port:          cfg.Server.Port,
+		Store:         st,
+		Scheduler:     sch,
+		ImageResolver: image.NewResolver(cfg.Image),
 	}
 }
 
@@ -37,7 +40,7 @@ func (s *APIServer) setupRouter() *gin.Engine {
 	{
 		jobHandler := handler.NewJobHandler(s.Store, s.Scheduler)
 		runHandler := handler.NewRunHandler(s.Store)
-		imageHandler := handler.NewImageHandler()
+		imageHandler := handler.NewImageHandler(s.ImageResolver)
 
 		api.GET("/jobs", jobHandler.ListJobs)
 		api.GET("/jobs/:jobId", jobHandler.GetJob)

@@ -7,17 +7,21 @@ import (
 	"time"
 
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/executor"
+	"github.com/hoonzinope/go-job-runner/internal/model"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type Executor interface {
-	Execute(ctx context.Context, jobID int64, runID int64) error
+	Execute(ctx context.Context, job *model.Job, run *model.Run) (*executor.ExecutionResult, error)
 }
 
 type noopExecutor struct{}
 
-func (noopExecutor) Execute(ctx context.Context, jobID int64, runID int64) error {
-	return nil
+func (noopExecutor) Execute(ctx context.Context, job *model.Job, run *model.Run) (*executor.ExecutionResult, error) {
+	return &executor.ExecutionResult{
+		ExitCode: 0,
+	}, nil
 }
 
 type Scheduler struct {
@@ -44,7 +48,7 @@ func NewScheduler(cfg *config.Config, st *store.Store) *Scheduler {
 		dueWakeup:         make(chan struct{}, 1),
 		dispatchWakeup:    make(chan struct{}, 1),
 		workerTokens:      make(chan struct{}, cfg.Scheduler.MaxConcurrentRuns),
-		executor:          noopExecutor{},
+		executor:          executor.NewDockerExecutor(cfg.Store, cfg.Image),
 	}
 }
 

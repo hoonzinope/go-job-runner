@@ -22,6 +22,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 		return
 	}
 
+	startedAt := time.Now().UTC()
 	if err := s.store.WithinTx(ctx, func(tx *store.TxStore) error {
 		freshRun, err := tx.Runs.Get(ctx, runID)
 		if err != nil {
@@ -44,7 +45,6 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			})
 			return err
 		case model.RunStatusPending:
-			startedAt := time.Now().UTC()
 			run.StartedAt = &startedAt
 			if err := tx.Runs.UpdateStatus(ctx, runID, model.RunStatusRunning, &startedAt, nil, nil, nil); err != nil {
 				return err
@@ -57,6 +57,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			})
 			return err
 		case model.RunStatusRunning:
+			run.StartedAt = freshRun.StartedAt
 			return nil
 		default:
 			return nil
@@ -67,9 +68,9 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	}
 
 	if ctx.Err() != nil {
+		finishedAt := time.Now().UTC()
+		msg := "context cancelled"
 		_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-			finishedAt := time.Now().UTC()
-			msg := "context cancelled"
 			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusCancelled, run.StartedAt, &finishedAt, run.ExitCode, run.ErrorMessage); err != nil {
 				return err
 			}
@@ -84,37 +85,82 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 		return
 	}
 
-	if err := s.newExecutor().Execute(ctx, job.ID, run.ID); err != nil {
-		finishedAt := time.Now().UTC()
-		msg := err.Error()
-		_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusFailed, run.StartedAt, &finishedAt, nil, &msg); err != nil {
+	result, execErr := s.newExecutor().Execute(ctx, job, run)
+	finishedAt := time.Now().UTC()
+
+	if result != nil && result.LogPath != "" {
+		run.LogPath = &result.LogPath
+	}
+	if result != nil && result.ResultPath != "" {
+		run.ResultPath = &result.ResultPath
+	}
+	if result != nil && result.ImageDigest != nil {
+		job.ImageDigest = result.ImageDigest
+	}
+
+	_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
+		if result != nil {
+			if err := tx.Runs.UpdateLogArtifacts(context.Background(), runID, run.LogPath, run.ResultPath); err != nil {
+				return err
+			}
+		}
+
+		switch {
+		case execErr == nil:
+			exitCode := 0
+			msg := "run completed"
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusSuccess, run.StartedAt, &finishedAt, &exitCode, nil); err != nil {
 				return err
 			}
 			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
 				RunID:     runID,
-				EventType: model.RunEventTypeFailed,
+				EventType: model.RunEventTypeCompleted,
 				Message:   &msg,
 			})
 			return err
-		})
-		s.signalDispatch()
-		return
-	}
-
-	finishedAt := time.Now().UTC()
-	exitCode := 0
-	msg := "run completed"
-	_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-		if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusSuccess, run.StartedAt, &finishedAt, &exitCode, nil); err != nil {
+		case ctx.Err() != nil:
+			msg := "context cancelled"
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusCancelled, run.StartedAt, &finishedAt, nil, &msg); err != nil {
+				return err
+			}
+			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
+				RunID:     runID,
+				EventType: model.RunEventTypeCancelled,
+				Message:   &msg,
+			})
+			return err
+		default:
+			exitCode := -1
+			if result != nil {
+				exitCode = result.ExitCode
+			}
+			msg := execErr.Error()
+			status := model.RunStatusFailed
+			if isTimeoutError(execErr) {
+				status = model.RunStatusTimeout
+			}
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, status, run.StartedAt, &finishedAt, &exitCode, &msg); err != nil {
+				return err
+			}
+			eventType := model.RunEventTypeFailed
+			if status == model.RunStatusTimeout {
+				eventType = model.RunEventTypeTimeout
+			}
+			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
+				RunID:     runID,
+				EventType: eventType,
+				Message:   &msg,
+			})
 			return err
 		}
-		_, err := tx.Events.Create(context.Background(), &model.RunEvent{
-			RunID:     runID,
-			EventType: model.RunEventTypeCompleted,
-			Message:   &msg,
-		})
-		return err
 	})
+
 	s.signalDispatch()
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err == context.DeadlineExceeded
 }

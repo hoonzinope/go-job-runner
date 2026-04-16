@@ -17,8 +17,22 @@ type SchedulerConfig struct {
 	MaxConcurrentRuns       int `yaml:"max_concurrent_runs"`
 }
 
+type ImageRemoteConfig struct {
+	Endpoint string `yaml:"endpoint"`
+	Insecure bool   `yaml:"insecure"`
+}
+
+type ImageConfig struct {
+	AllowedSources  []string          `yaml:"allowed_sources"`
+	DefaultSource   string            `yaml:"default_source"`
+	PullPolicy      string            `yaml:"pull_policy"`
+	AllowedPrefixes []string          `yaml:"allowed_prefixes"`
+	Remote          ImageRemoteConfig `yaml:"remote"`
+}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Store     StoreConfig     `yaml:"store"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Image     ImageConfig     `yaml:"image"`
 }
