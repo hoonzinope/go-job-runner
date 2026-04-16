@@ -11,6 +11,7 @@ import (
 type Candidate struct {
 	SourceType string  `json:"sourceType"`
 	ImageRef   string  `json:"imageRef"`
+	PullRef    string  `json:"pullRef,omitempty"`
 	Digest     *string `json:"digest,omitempty"`
 }
 

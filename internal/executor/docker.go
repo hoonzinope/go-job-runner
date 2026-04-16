@@ -56,7 +56,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		return nil, err
 	}
 
-	if err := e.ensureImage(ctx, candidate.ImageRef); err != nil {
+	pullRef := candidate.PullRef
+	if pullRef == "" {
+		pullRef = candidate.ImageRef
+	}
+
+	if err := e.ensureImage(ctx, pullRef); err != nil {
 		return nil, err
 	}
 
@@ -83,7 +88,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	if job.TimeoutSec > 0 {
 		args = append(args, "--stop-timeout", strconv.Itoa(job.TimeoutSec))
 	}
-	args = append(args, candidate.ImageRef)
+	args = append(args, pullRef)
 
 	runCtx := ctx
 	cancelRun := func() {}
@@ -98,7 +103,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
 		// Jobs are image-driven; params are made available as env vars for the container.
 		// The executor keeps this simple by serializing them into a single env var.
-		cmd.Env = []string{"JOB_PARAMS=" + params}
+		cmd.Env = append(os.Environ(), "JOB_PARAMS="+params)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -122,6 +127,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		if err != nil {
 			exitCode := exitCodeFromErr(err)
 			if exitCode == -1 {
+				if writeErr := e.writeResult(resultPath, run, job, candidate, exitCode, err.Error()); writeErr != nil {
+					return &ExecutionResult{
+						ExitCode:    exitCode,
+						LogPath:     logPath,
+						ResultPath:  resultPath,
+						ImageDigest: candidate.Digest,
+					}, fmt.Errorf("write result: %w", writeErr)
+				}
 				return &ExecutionResult{
 					ExitCode:    exitCode,
 					LogPath:     logPath,
@@ -129,7 +142,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 					ImageDigest: candidate.Digest,
 				}, err
 			}
-			_ = e.writeResult(resultPath, run, job, candidate, exitCode, err.Error())
+			if writeErr := e.writeResult(resultPath, run, job, candidate, exitCode, err.Error()); writeErr != nil {
+				return &ExecutionResult{
+					ExitCode:    exitCode,
+					LogPath:     logPath,
+					ResultPath:  resultPath,
+					ImageDigest: candidate.Digest,
+				}, fmt.Errorf("write result: %w", writeErr)
+			}
 			return &ExecutionResult{
 				ExitCode:    exitCode,
 				LogPath:     logPath,
@@ -137,7 +157,14 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 				ImageDigest: candidate.Digest,
 			}, err
 		}
-		_ = e.writeResult(resultPath, run, job, candidate, 0, "success")
+		if writeErr := e.writeResult(resultPath, run, job, candidate, 0, "success"); writeErr != nil {
+			return &ExecutionResult{
+				ExitCode:    0,
+				LogPath:     logPath,
+				ResultPath:  resultPath,
+				ImageDigest: candidate.Digest,
+			}, fmt.Errorf("write result: %w", writeErr)
+		}
 		return &ExecutionResult{
 			ExitCode:    0,
 			LogPath:     logPath,
@@ -178,6 +205,7 @@ func (e *DockerExecutor) writeResult(resultPath string, run *model.Run, job *mod
 		"jobId":       job.ID,
 		"runId":       run.ID,
 		"imageRef":    candidate.ImageRef,
+		"pullRef":     candidate.PullRef,
 		"imageDigest": candidate.Digest,
 		"exitCode":    exitCode,
 		"message":     message,

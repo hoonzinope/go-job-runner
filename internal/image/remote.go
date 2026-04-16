@@ -16,11 +16,12 @@ import (
 )
 
 type RemoteSource struct {
-	endpoint string
-	client   *http.Client
-	cacheMu  sync.RWMutex
-	tagCache map[string]tagCacheEntry
-	cacheTTL time.Duration
+	endpoint   string
+	pullPrefix string
+	client     *http.Client
+	cacheMu    sync.RWMutex
+	tagCache   map[string]tagCacheEntry
+	cacheTTL   time.Duration
 }
 
 type tagCacheEntry struct {
@@ -33,11 +34,17 @@ func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
 	if cfg.Insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // nolint:gosec
 	}
+	parsed, err := url.Parse(strings.TrimRight(cfg.Endpoint, "/"))
+	pullPrefix := strings.TrimRight(cfg.Endpoint, "/")
+	if err == nil && parsed.Host != "" {
+		pullPrefix = parsed.Host
+	}
 	return &RemoteSource{
-		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
-		client:   &http.Client{Transport: transport},
-		tagCache: make(map[string]tagCacheEntry),
-		cacheTTL: 5 * time.Minute,
+		endpoint:   strings.TrimRight(cfg.Endpoint, "/"),
+		pullPrefix: pullPrefix,
+		client:     &http.Client{Transport: transport},
+		tagCache:   make(map[string]tagCacheEntry),
+		cacheTTL:   5 * time.Minute,
 	}
 }
 
@@ -143,6 +150,7 @@ func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate
 	if repo == "" || tag == "" {
 		return nil, fmt.Errorf("invalid remote image ref %q", imageRef)
 	}
+	pullRef := fmt.Sprintf("%s/%s:%s", s.pullPrefix, repo, tag)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/v2/"+repo+"/manifests/"+url.PathEscape(tag), nil)
 	if err != nil {
@@ -172,9 +180,9 @@ func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate
 		}
 	}
 	if digest == "" {
-		return &Candidate{SourceType: "remote", ImageRef: imageRef}, nil
+		return &Candidate{SourceType: "remote", ImageRef: imageRef, PullRef: pullRef}, nil
 	}
-	return &Candidate{SourceType: "remote", ImageRef: imageRef, Digest: &digest}, nil
+	return &Candidate{SourceType: "remote", ImageRef: imageRef, PullRef: pullRef, Digest: &digest}, nil
 }
 
 func (s *RemoteSource) listRepositories(ctx context.Context) ([]string, error) {

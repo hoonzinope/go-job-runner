@@ -36,7 +36,7 @@ func (s *LocalSource) ListCandidates(ctx context.Context, q, prefix string) ([]C
 			continue
 		}
 		d := digest
-		candidates = append(candidates, Candidate{SourceType: "local", ImageRef: ref, Digest: &d})
+		candidates = append(candidates, Candidate{SourceType: "local", ImageRef: ref, PullRef: ref, Digest: &d})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan docker images: %w", err)
@@ -52,7 +52,7 @@ func (s *LocalSource) Resolve(ctx context.Context, imageRef string) (*Candidate,
 	}
 	digest := strings.TrimSpace(string(out))
 	if digest == "" {
-		return &Candidate{SourceType: "local", ImageRef: imageRef}, nil
+		return &Candidate{SourceType: "local", ImageRef: imageRef, PullRef: imageRef}, nil
 	}
-	return &Candidate{SourceType: "local", ImageRef: imageRef, Digest: &digest}, nil
+	return &Candidate{SourceType: "local", ImageRef: imageRef, PullRef: imageRef, Digest: &digest}, nil
 }

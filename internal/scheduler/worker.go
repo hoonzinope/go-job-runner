@@ -104,19 +104,10 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	if result != nil && result.ResultPath != "" {
 		run.ResultPath = &result.ResultPath
 	}
-	if result != nil && result.ImageDigest != nil {
-		job.ImageDigest = result.ImageDigest
-	}
 
 	if err := s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
 		if result != nil {
 			if err := tx.Runs.UpdateLogArtifacts(context.Background(), runID, run.LogPath, run.ResultPath); err != nil {
-				return err
-			}
-		}
-		if result != nil && result.ImageDigest != nil {
-			job.ImageDigest = result.ImageDigest
-			if err := tx.Jobs.Update(context.Background(), job); err != nil {
 				return err
 			}
 		}
