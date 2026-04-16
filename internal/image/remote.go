@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/hoonzinope/go-job-runner/internal/config"
 )
@@ -16,6 +18,14 @@ import (
 type RemoteSource struct {
 	endpoint string
 	client   *http.Client
+	cacheMu  sync.RWMutex
+	tagCache map[string]tagCacheEntry
+	cacheTTL time.Duration
+}
+
+type tagCacheEntry struct {
+	tags      []string
+	fetchedAt time.Time
 }
 
 func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
@@ -26,6 +36,8 @@ func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
 	return &RemoteSource{
 		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
 		client:   &http.Client{Transport: transport},
+		tagCache: make(map[string]tagCacheEntry),
+		cacheTTL: 5 * time.Minute,
 	}
 }
 
@@ -35,7 +47,7 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 		return nil, err
 	}
 
-	var candidates []Candidate
+	filteredRepos := make([]string, 0, len(repos))
 	for _, repo := range repos {
 		if prefix != "" && !strings.HasPrefix(repo, prefix) {
 			continue
@@ -43,19 +55,87 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 		if q != "" && !strings.Contains(repo, q) {
 			continue
 		}
-		tags, err := s.listTags(ctx, repo)
-		if err != nil {
-			return nil, err
-		}
-		for _, tag := range tags {
-			ref := fmt.Sprintf("%s:%s", repo, tag)
-			if q != "" && !strings.Contains(ref, q) {
-				continue
+		filteredRepos = append(filteredRepos, repo)
+	}
+
+	var candidates []Candidate
+
+	type repoTags struct {
+		items []Candidate
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, 8)
+	results := make(chan repoTags, len(filteredRepos))
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+
+	for _, repo := range filteredRepos {
+		repo := repo
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
 			}
-			candidates = append(candidates, Candidate{SourceType: "remote", ImageRef: ref})
+			defer func() { <-sem }()
+
+			tags, err := s.tagsForRepo(ctx, repo)
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				cancel()
+				return
+			}
+			items := make([]Candidate, 0, len(tags))
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			for _, tag := range tags {
+				ref := fmt.Sprintf("%s:%s", repo, tag)
+				if q != "" && !strings.Contains(ref, q) {
+					continue
+				}
+				items = append(items, Candidate{SourceType: "remote", ImageRef: ref})
+			}
+			select {
+			case results <- repoTags{items: items}:
+			case <-ctx.Done():
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				return nil, err
+			}
+		case item, ok := <-results:
+			if !ok {
+				return candidates, nil
+			}
+			candidates = append(candidates, item.items...)
+		case <-ctx.Done():
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return candidates, nil
 		}
 	}
-	return candidates, nil
 }
 
 func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate, error) {
@@ -141,6 +221,31 @@ func (s *RemoteSource) listTags(ctx context.Context, repo string) ([]string, err
 		return nil, fmt.Errorf("decode remote tags: %w", err)
 	}
 	return payload.Tags, nil
+}
+
+func (s *RemoteSource) tagsForRepo(ctx context.Context, repo string) ([]string, error) {
+	now := time.Now().UTC()
+
+	s.cacheMu.RLock()
+	if entry, ok := s.tagCache[repo]; ok && now.Sub(entry.fetchedAt) < s.cacheTTL {
+		tags := append([]string(nil), entry.tags...)
+		s.cacheMu.RUnlock()
+		return tags, nil
+	}
+	s.cacheMu.RUnlock()
+
+	tags, err := s.listTags(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cacheMu.Lock()
+	s.tagCache[repo] = tagCacheEntry{
+		tags:      append([]string(nil), tags...),
+		fetchedAt: now,
+	}
+	s.cacheMu.Unlock()
+	return tags, nil
 }
 
 func splitImageRef(ref string) (string, string) {
