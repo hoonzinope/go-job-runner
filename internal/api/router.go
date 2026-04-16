@@ -32,6 +32,31 @@ func NewAPIServer(cfg *config.Config, st *store.Store) *APIServer {
 func (s *APIServer) setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/health", handler.HealthzHandler)
+
+	api := router.Group("/api/v1")
+	{
+		jobHandler := handler.NewJobHandler(s.Store)
+		runHandler := handler.NewRunHandler(s.Store)
+		imageHandler := handler.NewImageHandler()
+
+		api.GET("/jobs", jobHandler.ListJobs)
+		api.GET("/jobs/:jobId", jobHandler.GetJob)
+		api.POST("/jobs", jobHandler.CreateJob)
+		api.PUT("/jobs/:jobId", jobHandler.UpdateJob)
+		api.DELETE("/jobs/:jobId", jobHandler.DeleteJob)
+		api.POST("/jobs/:jobId/trigger", jobHandler.TriggerJob)
+		api.GET("/jobs/:jobId/runs", jobHandler.ListJobRuns)
+
+		api.GET("/runs", runHandler.ListRuns)
+		api.GET("/runs/:runId", runHandler.GetRun)
+		api.POST("/runs/:runId/cancel", runHandler.CancelRun)
+		api.GET("/runs/:runId/events", runHandler.ListRunEvents)
+		api.GET("/runs/:runId/logs", runHandler.GetRunLogs)
+
+		api.GET("/images", imageHandler.ListImages)
+		api.GET("/images/resolve", imageHandler.ResolveImage)
+		api.GET("/images/:sourceType/candidates", imageHandler.ListImageCandidates)
+	}
 	return router
 }
 
