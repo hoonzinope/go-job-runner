@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,9 +19,13 @@ type RemoteSource struct {
 }
 
 func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if cfg.Insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // nolint:gosec
+	}
 	return &RemoteSource{
 		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
-		client:   &http.Client{},
+		client:   &http.Client{Transport: transport},
 	}
 }
 
@@ -40,7 +45,7 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 		}
 		tags, err := s.listTags(ctx, repo)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for _, tag := range tags {
 			ref := fmt.Sprintf("%s:%s", repo, tag)
@@ -103,7 +108,8 @@ func (s *RemoteSource) listRepositories(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("remote catalog status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("remote catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var payload struct {
 		Repositories []string `json:"repositories"`
@@ -125,7 +131,8 @@ func (s *RemoteSource) listTags(ctx context.Context, repo string) ([]string, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("remote tags status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("remote tags status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var payload struct {
 		Tags []string `json:"tags"`

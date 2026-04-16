@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 func (c *Config) Validate() error {
@@ -50,9 +51,42 @@ func (c *Config) Validate() error {
 		log.Printf("Image pull_policy is required")
 		return fmt.Errorf("image pull_policy is required")
 	}
-	if c.Image.Remote.Endpoint == "" {
-		log.Printf("Image remote.endpoint is required")
-		return fmt.Errorf("image remote.endpoint is required")
+
+	validSource := map[string]struct{}{
+		"local":  {},
+		"remote": {},
+	}
+	for _, source := range c.Image.AllowedSources {
+		if _, ok := validSource[source]; !ok {
+			return fmt.Errorf("unsupported image allowed_source: %q", source)
+		}
+	}
+	if _, ok := validSource[c.Image.DefaultSource]; !ok {
+		return fmt.Errorf("unsupported image default_source: %q", c.Image.DefaultSource)
+	}
+	if !containsString(c.Image.AllowedSources, c.Image.DefaultSource) {
+		return fmt.Errorf("default_source %q must be included in allowed_sources", c.Image.DefaultSource)
+	}
+	validPullPolicy := map[string]struct{}{
+		"always":         {},
+		"if_not_present": {},
+		"never":          {},
+	}
+	if _, ok := validPullPolicy[strings.ToLower(c.Image.PullPolicy)]; !ok {
+		return fmt.Errorf("unsupported image pull_policy: %q", c.Image.PullPolicy)
+	}
+	remoteEnabled := containsString(c.Image.AllowedSources, "remote") || c.Image.DefaultSource == "remote"
+	if remoteEnabled && c.Image.Remote.Endpoint == "" {
+		return fmt.Errorf("image remote.endpoint is required when remote source is enabled")
 	}
 	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

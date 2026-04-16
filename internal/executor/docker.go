@@ -78,20 +78,27 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}
 	defer logFile.Close()
 
-	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
+	containerName := fmt.Sprintf("job-runner-run-%d-%d-%d", run.JobID, run.ID, time.Now().UTC().UnixNano())
 	args := []string{"run", "--rm", "--name", containerName}
 	if job.TimeoutSec > 0 {
 		args = append(args, "--stop-timeout", strconv.Itoa(job.TimeoutSec))
 	}
 	args = append(args, candidate.ImageRef)
 
-	cmd := exec.Command("docker", args...)
+	runCtx := ctx
+	cancelRun := func() {}
+	if job.TimeoutSec > 0 {
+		runCtx, cancelRun = context.WithTimeout(ctx, time.Duration(job.TimeoutSec)*time.Second)
+	}
+	defer cancelRun()
+
+	cmd := exec.CommandContext(runCtx, "docker", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
 		// Jobs are image-driven; params are made available as env vars for the container.
 		// The executor keeps this simple by serializing them into a single env var.
-		cmd.Env = append(os.Environ(), "JOB_PARAMS="+params)
+		cmd.Env = []string{"JOB_PARAMS=" + params}
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -104,11 +111,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}()
 
 	select {
-	case <-ctx.Done():
-		_ = exec.Command("docker", "stop", containerName).Run()
+	case <-runCtx.Done():
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = exec.CommandContext(stopCtx, "docker", "stop", containerName).Run()
+		cancelStop()
 		_ = cmd.Process.Kill()
 		_ = <-waitCh
-		return nil, ctx.Err()
+		return nil, runCtx.Err()
 	case err := <-waitCh:
 		if err != nil {
 			exitCode := exitCodeFromErr(err)

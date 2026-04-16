@@ -71,14 +71,14 @@ func (r *Resolver) ListCandidates(ctx context.Context, sourceType, q, prefix str
 	if !r.SourceAllowed(sourceType) {
 		return nil, fmt.Errorf("source type %q is not allowed", sourceType)
 	}
-	if prefix == "" {
-		prefix = ""
+	if err := r.ValidatePrefix(prefix); err != nil {
+		return nil, err
 	}
 	switch sourceType {
 	case "local":
-		return r.local.ListCandidates(ctx, q, prefix)
+		return r.filterCandidates(r.local.ListCandidates(ctx, q, prefix))
 	case "remote":
-		return r.remote.ListCandidates(ctx, q, prefix)
+		return r.filterCandidates(r.remote.ListCandidates(ctx, q, prefix))
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -99,4 +99,35 @@ func (r *Resolver) Resolve(ctx context.Context, sourceType, imageRef string) (*C
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
+}
+
+func (r *Resolver) ValidatePrefix(prefix string) error {
+	if prefix == "" || len(r.cfg.AllowedPrefixes) == 0 {
+		return nil
+	}
+	for _, allowed := range r.cfg.AllowedPrefixes {
+		if strings.HasPrefix(prefix, allowed) {
+			return nil
+		}
+	}
+	return fmt.Errorf("prefix %q is not allowed by prefix policy", prefix)
+}
+
+func (r *Resolver) filterCandidates(candidates []Candidate, err error) ([]Candidate, error) {
+	if err != nil {
+		return nil, err
+	}
+	if len(r.cfg.AllowedPrefixes) == 0 {
+		return candidates, nil
+	}
+	filtered := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		for _, allowed := range r.cfg.AllowedPrefixes {
+			if strings.HasPrefix(candidate.ImageRef, allowed) {
+				filtered = append(filtered, candidate)
+				break
+			}
+		}
+	}
+	return filtered, nil
 }
