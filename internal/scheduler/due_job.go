@@ -1,0 +1,125 @@
+package scheduler
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/robfig/cron/v3"
+
+	"github.com/hoonzinope/go-job-runner/internal/model"
+	"github.com/hoonzinope/go-job-runner/internal/store"
+)
+
+func (s *Scheduler) dueJobLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.dueJobInterval)
+	defer ticker.Stop()
+
+	s.processDueJobs(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.processDueJobs(ctx)
+		case <-s.dueWakeup:
+			s.processDueJobs(ctx)
+		}
+	}
+}
+
+func (s *Scheduler) processDueJobs(ctx context.Context) {
+	now := time.Now().UTC()
+	jobs, err := s.store.Jobs.ListDue(ctx, now)
+	if err != nil {
+		fmt.Printf("scheduler due-job scan error: %v\n", err)
+		return
+	}
+
+	for i := range jobs {
+		if err := s.processDueJob(ctx, &jobs[i], now); err != nil {
+			fmt.Printf("scheduler due-job process error (job=%d): %v\n", jobs[i].ID, err)
+		}
+	}
+}
+
+func (s *Scheduler) processDueJob(ctx context.Context, job *model.Job, now time.Time) error {
+	if job.NextRunAt == nil {
+		return nil
+	}
+
+	nextRunAt, err := computeNextRunAt(job, now)
+	if err != nil {
+		return err
+	}
+	scheduledAt := (*job.NextRunAt).UTC()
+	scheduledAtPtr := &scheduledAt
+
+	return s.store.WithinTx(ctx, func(tx *store.TxStore) error {
+		if job.ConcurrencyPolicy == model.ConcurrencyPolicyForbid {
+			running, _, err := tx.Runs.List(ctx, store.RunFilter{
+				JobID:  &job.ID,
+				Status: runStatusPtr(model.RunStatusRunning),
+			}, store.Page{Page: 1, Size: 1})
+			if err != nil {
+				return err
+			}
+			if len(running) > 0 {
+				return tx.Jobs.UpdateScheduling(ctx, job.ID, &nextRunAt, scheduledAtPtr)
+			}
+		}
+
+		run := &model.Run{
+			JobID:       job.ID,
+			ScheduledAt: scheduledAt,
+			Status:      model.RunStatusPending,
+			Attempt:     0,
+		}
+		if _, err := tx.Runs.Create(ctx, run); err != nil {
+			return err
+		}
+		if _, err := tx.Events.Create(ctx, &model.RunEvent{
+			RunID:     run.ID,
+			EventType: model.RunEventTypeCreated,
+		}); err != nil {
+			return err
+		}
+		if err := tx.Jobs.UpdateScheduling(ctx, job.ID, &nextRunAt, scheduledAtPtr); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func computeNextRunAt(job *model.Job, from time.Time) (time.Time, error) {
+	switch job.ScheduleType {
+	case model.ScheduleTypeInterval:
+		if job.IntervalSec == nil || *job.IntervalSec <= 0 {
+			return time.Time{}, fmt.Errorf("invalid intervalSec for job %d", job.ID)
+		}
+		return from.Add(time.Duration(*job.IntervalSec) * time.Second).UTC(), nil
+	case model.ScheduleTypeCron:
+		if job.ScheduleExpr == nil || *job.ScheduleExpr == "" {
+			return time.Time{}, fmt.Errorf("missing scheduleExpr for job %d", job.ID)
+		}
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+		sched, err := parser.Parse(*job.ScheduleExpr)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("parse cron expr for job %d: %w", job.ID, err)
+		}
+		loc := time.UTC
+		if job.Timezone != "" {
+			if loaded, err := time.LoadLocation(job.Timezone); err == nil {
+				loc = loaded
+			}
+		}
+		return sched.Next(from.In(loc)).UTC(), nil
+	default:
+		return time.Time{}, fmt.Errorf("unsupported schedule type %q", job.ScheduleType)
+	}
+}
+
+func runStatusPtr(status model.RunStatus) *model.RunStatus {
+	return &status
+}

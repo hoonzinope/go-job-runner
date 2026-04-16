@@ -26,5 +26,17 @@ func (c *Config) Validate() error {
 		log.Printf("Store artifact_root is required")
 		return fmt.Errorf("store artifact_root is required")
 	}
+	if c.Scheduler.DueJobScanIntervalSec <= 0 {
+		log.Printf("Scheduler due_job_scan_interval_sec must be > 0")
+		return fmt.Errorf("scheduler due_job_scan_interval_sec must be > 0")
+	}
+	if c.Scheduler.DispatchScanIntervalSec <= 0 {
+		log.Printf("Scheduler dispatch_scan_interval_sec must be > 0")
+		return fmt.Errorf("scheduler dispatch_scan_interval_sec must be > 0")
+	}
+	if c.Scheduler.MaxConcurrentRuns <= 0 {
+		log.Printf("Scheduler max_concurrent_runs must be > 0")
+		return fmt.Errorf("scheduler max_concurrent_runs must be > 0")
+	}
 	return nil
 }

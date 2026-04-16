@@ -12,15 +12,17 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/hoonzinope/go-job-runner/internal/model"
+	"github.com/hoonzinope/go-job-runner/internal/scheduler"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type JobHandler struct {
-	store *store.Store
+	store     *store.Store
+	scheduler *scheduler.Scheduler
 }
 
-func NewJobHandler(st *store.Store) *JobHandler {
-	return &JobHandler{store: st}
+func NewJobHandler(st *store.Store, sch *scheduler.Scheduler) *JobHandler {
+	return &JobHandler{store: st, scheduler: sch}
 }
 
 func (h *JobHandler) ListJobs(c *gin.Context) {
@@ -97,6 +99,9 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	if h.scheduler != nil {
+		h.scheduler.NotifyDueJob()
+	}
 
 	c.JSON(http.StatusCreated, toJobResponse(job))
 }
@@ -132,6 +137,9 @@ func (h *JobHandler) UpdateJob(c *gin.Context) {
 	if err := h.store.Jobs.Update(c.Request.Context(), job); err != nil {
 		internalError(c, err)
 		return
+	}
+	if h.scheduler != nil {
+		h.scheduler.NotifyDueJob()
 	}
 
 	c.JSON(http.StatusOK, toJobResponse(job))
@@ -206,6 +214,9 @@ func (h *JobHandler) TriggerJob(c *gin.Context) {
 	}); err != nil {
 		internalError(c, err)
 		return
+	}
+	if h.scheduler != nil {
+		h.scheduler.NotifyDispatch()
 	}
 
 	c.JSON(http.StatusCreated, toRunResponse(run))

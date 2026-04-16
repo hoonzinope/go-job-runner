@@ -3,19 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	"github.com/hoonzinope/go-job-runner/internal/api"
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/scheduler"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
-var (
-	ctx context.Context
-)
-
 func main() {
-	// create root context
-	ctx = context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// load & validate config
 	cfg, err := config.LoadConfig(".")
@@ -39,8 +38,15 @@ func main() {
 		}
 	}()
 
+	sch := scheduler.NewScheduler(cfg, st)
+	go func() {
+		if err := sch.Start(ctx); err != nil {
+			fmt.Printf("Error starting scheduler: %v\n", err)
+		}
+	}()
+
 	// start API server
-	apiServer := api.NewAPIServer(cfg, st)
+	apiServer := api.NewAPIServer(cfg, st, sch)
 	if err := apiServer.StartServer(ctx); err != nil {
 		fmt.Printf("Error starting API server: %v\n", err)
 	}

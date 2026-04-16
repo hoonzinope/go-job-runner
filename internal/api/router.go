@@ -4,28 +4,28 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hoonzinope/go-job-runner/internal/api/handler"
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/scheduler"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type APIServer struct {
-	Host  string
-	Port  int
-	Store *store.Store
+	Host      string
+	Port      int
+	Store     *store.Store
+	Scheduler *scheduler.Scheduler
 }
 
-func NewAPIServer(cfg *config.Config, st *store.Store) *APIServer {
+func NewAPIServer(cfg *config.Config, st *store.Store, sch *scheduler.Scheduler) *APIServer {
 	return &APIServer{
-		Host:  cfg.Server.Host,
-		Port:  cfg.Server.Port,
-		Store: st,
+		Host:      cfg.Server.Host,
+		Port:      cfg.Server.Port,
+		Store:     st,
+		Scheduler: sch,
 	}
 }
 
@@ -35,7 +35,7 @@ func (s *APIServer) setupRouter() *gin.Engine {
 
 	api := router.Group("/api/v1")
 	{
-		jobHandler := handler.NewJobHandler(s.Store)
+		jobHandler := handler.NewJobHandler(s.Store, s.Scheduler)
 		runHandler := handler.NewRunHandler(s.Store)
 		imageHandler := handler.NewImageHandler()
 
@@ -75,18 +75,13 @@ func (s *APIServer) StartServer(ctx context.Context) error {
 
 	fmt.Printf("API server started on %s:%d\n", s.Host, s.Port)
 
-	// Wait for context cancellation
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-	<-quit
+	<-ctx.Done()
 	fmt.Println("Shutting down API server...")
 
-	// Create a context with timeout for shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Shutdown the server gracefully
-	if err := server.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("API server shutdown error: %w", err)
 	}
 
