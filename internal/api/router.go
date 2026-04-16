@@ -12,17 +12,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hoonzinope/go-job-runner/internal/api/handler"
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type APIServer struct {
-	Host string
-	Port int
+	Host  string
+	Port  int
+	Store *store.Store
 }
 
-func NewAPIServer(cfg *config.Config) *APIServer {
+func NewAPIServer(cfg *config.Config, st *store.Store) *APIServer {
 	return &APIServer{
-		Host: cfg.Server.Host,
-		Port: cfg.Server.Port,
+		Host:  cfg.Server.Host,
+		Port:  cfg.Server.Port,
+		Store: st,
 	}
 }
 

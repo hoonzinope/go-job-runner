@@ -1,3 +1,8 @@
 server:
   port: 8888
   host: "localhost"
+
+store:
+  sqlite_path: ./data/app.db
+  log_root: ./data/logs
+  artifact_root: ./data/artifacts

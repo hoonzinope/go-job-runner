@@ -14,5 +14,17 @@ func (c *Config) Validate() error {
 		log.Printf("Server host is required")
 		return fmt.Errorf("server host is required")
 	}
+	if c.Store.SQLitePath == "" {
+		log.Printf("Store sqlite_path is required")
+		return fmt.Errorf("store sqlite_path is required")
+	}
+	if c.Store.LogRoot == "" {
+		log.Printf("Store log_root is required")
+		return fmt.Errorf("store log_root is required")
+	}
+	if c.Store.ArtifactRoot == "" {
+		log.Printf("Store artifact_root is required")
+		return fmt.Errorf("store artifact_root is required")
+	}
 	return nil
 }

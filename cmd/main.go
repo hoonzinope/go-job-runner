@@ -6,6 +6,7 @@ import (
 
 	"github.com/hoonzinope/go-job-runner/internal/api"
 	"github.com/hoonzinope/go-job-runner/internal/config"
+	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 var (
@@ -27,8 +28,19 @@ func main() {
 		return
 	}
 
+	st, err := store.Open(cfg.Store.SQLitePath)
+	if err != nil {
+		fmt.Printf("Error opening store: %v\n", err)
+		return
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			fmt.Printf("Error closing store: %v\n", err)
+		}
+	}()
+
 	// start API server
-	apiServer := api.NewAPIServer(cfg)
+	apiServer := api.NewAPIServer(cfg, st)
 	if err := apiServer.StartServer(ctx); err != nil {
 		fmt.Printf("Error starting API server: %v\n", err)
 	}
