@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -24,17 +25,28 @@ type ExecutionResult struct {
 	ImageDigest *string
 }
 
+type imageResolver interface {
+	SourceAllowed(string) bool
+	ValidateRef(string) error
+	Resolve(context.Context, string, string) (*image.Candidate, error)
+}
+
+type containerRunner interface {
+	EnsureImage(context.Context, string) error
+	RunContainer(context.Context, string, string, int, string, io.Writer, io.Writer) error
+}
+
 type DockerExecutor struct {
-	pullPolicy   string
-	resolver     *image.Resolver
+	resolver     imageResolver
+	runner       containerRunner
 	logWriter    *logwriter.Writer
 	resultWriter *logwriter.ResultWriter
 }
 
 func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig) *DockerExecutor {
 	return &DockerExecutor{
-		pullPolicy:   imageCfg.PullPolicy,
 		resolver:     image.NewResolver(imageCfg),
+		runner:       &realDockerRunner{pullPolicy: imageCfg.PullPolicy},
 		logWriter:    logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
 		resultWriter: logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
 	}
@@ -43,6 +55,9 @@ func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig)
 func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model.Run) (*ExecutionResult, error) {
 	if job == nil || run == nil {
 		return nil, fmt.Errorf("job and run are required")
+	}
+	if e.resolver == nil || e.runner == nil || e.logWriter == nil || e.resultWriter == nil {
+		return nil, fmt.Errorf("executor is not configured")
 	}
 	if !e.resolver.SourceAllowed(string(job.SourceType)) {
 		return nil, fmt.Errorf("source type %q is not allowed", job.SourceType)
@@ -61,7 +76,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		pullRef = candidate.ImageRef
 	}
 
-	if err := e.ensureImage(ctx, pullRef); err != nil {
+	if err := e.runner.EnsureImage(ctx, pullRef); err != nil {
 		return nil, err
 	}
 
@@ -78,122 +93,74 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	defer resultFile.Close()
 
 	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
-	args := []string{"run", "--rm", "--name", containerName}
-	if job.TimeoutSec > 0 {
-		args = append(args, "--stop-timeout", strconv.Itoa(job.TimeoutSec))
-	}
-	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
-		// Pass parameters into the container, not the docker CLI process.
-		args = append(args, "-e", "JOB_PARAMS="+params)
-	}
-	args = append(args, pullRef)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start docker run: %w", err)
-	}
-
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- cmd.Wait()
-	}()
-
-	select {
-	case <-ctx.Done():
-		stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = exec.CommandContext(stopCtx, "docker", "stop", containerName).Run()
-		cancelStop()
-		_ = cmd.Process.Kill()
-		_ = <-waitCh
-		return &ExecutionResult{
-			ExitCode:    -1,
-			LogPath:     logPath,
-			ResultPath:  resultPath,
-			ImageDigest: candidate.Digest,
-		}, ctx.Err()
-	case err := <-waitCh:
-		if err != nil {
-			exitCode := exitCodeFromErr(err)
-			if exitCode == -1 {
-				if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
-					JobID:       job.ID,
-					RunID:       run.ID,
-					ImageRef:    candidate.ImageRef,
-					PullRef:     candidate.PullRef,
-					ImageDigest: candidate.Digest,
-					ExitCode:    exitCode,
-					Message:     err.Error(),
-					FinishedAt:  time.Now().UTC(),
-				}); writeErr != nil {
-					return &ExecutionResult{
-						ExitCode:    exitCode,
-						LogPath:     logPath,
-						ResultPath:  resultPath,
-						ImageDigest: candidate.Digest,
-					}, fmt.Errorf("write result: %w", writeErr)
-				}
-				return &ExecutionResult{
-					ExitCode:    exitCode,
-					LogPath:     logPath,
-					ResultPath:  resultPath,
-					ImageDigest: candidate.Digest,
-				}, err
-			}
-			if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
-				JobID:       job.ID,
-				RunID:       run.ID,
-				ImageRef:    candidate.ImageRef,
-				PullRef:     candidate.PullRef,
-				ImageDigest: candidate.Digest,
-				ExitCode:    exitCode,
-				Message:     err.Error(),
-				FinishedAt:  time.Now().UTC(),
-			}); writeErr != nil {
-				return &ExecutionResult{
-					ExitCode:    exitCode,
-					LogPath:     logPath,
-					ResultPath:  resultPath,
-					ImageDigest: candidate.Digest,
-				}, fmt.Errorf("write result: %w", writeErr)
-			}
+	if err := e.runner.RunContainer(ctx, containerName, pullRef, job.TimeoutSec, jobParamsJSON(job), logFile, logFile); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return &ExecutionResult{
-				ExitCode:    exitCode,
+				ExitCode:    -1,
 				LogPath:     logPath,
 				ResultPath:  resultPath,
 				ImageDigest: candidate.Digest,
 			}, err
 		}
+
+		exitCode := exitCodeFromErr(err)
 		if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
 			JobID:       job.ID,
 			RunID:       run.ID,
 			ImageRef:    candidate.ImageRef,
-			PullRef:     candidate.PullRef,
+			PullRef:     pullRef,
 			ImageDigest: candidate.Digest,
-			ExitCode:    0,
-			Message:     "success",
+			ExitCode:    exitCode,
+			Message:     err.Error(),
 			FinishedAt:  time.Now().UTC(),
 		}); writeErr != nil {
 			return &ExecutionResult{
-				ExitCode:    0,
+				ExitCode:    exitCode,
 				LogPath:     logPath,
 				ResultPath:  resultPath,
 				ImageDigest: candidate.Digest,
 			}, fmt.Errorf("write result: %w", writeErr)
 		}
 		return &ExecutionResult{
+			ExitCode:    exitCode,
+			LogPath:     logPath,
+			ResultPath:  resultPath,
+			ImageDigest: candidate.Digest,
+		}, err
+	}
+
+	if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
+		JobID:       job.ID,
+		RunID:       run.ID,
+		ImageRef:    candidate.ImageRef,
+		PullRef:     pullRef,
+		ImageDigest: candidate.Digest,
+		ExitCode:    0,
+		Message:     "success",
+		FinishedAt:  time.Now().UTC(),
+	}); writeErr != nil {
+		return &ExecutionResult{
 			ExitCode:    0,
 			LogPath:     logPath,
 			ResultPath:  resultPath,
 			ImageDigest: candidate.Digest,
-		}, nil
+		}, fmt.Errorf("write result: %w", writeErr)
 	}
+
+	return &ExecutionResult{
+		ExitCode:    0,
+		LogPath:     logPath,
+		ResultPath:  resultPath,
+		ImageDigest: candidate.Digest,
+	}, nil
 }
 
-func (e *DockerExecutor) ensureImage(ctx context.Context, imageRef string) error {
-	switch strings.ToLower(strings.TrimSpace(e.pullPolicy)) {
+type realDockerRunner struct {
+	pullPolicy string
+}
+
+func (r *realDockerRunner) EnsureImage(ctx context.Context, imageRef string) error {
+	switch strings.ToLower(strings.TrimSpace(r.pullPolicy)) {
 	case "", "if_not_present":
 		if err := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef).Run(); err == nil {
 			return nil
@@ -212,7 +179,43 @@ func (e *DockerExecutor) ensureImage(ctx context.Context, imageRef string) error
 	case "never":
 		return nil
 	default:
-		return fmt.Errorf("unsupported pull policy %q", e.pullPolicy)
+		return fmt.Errorf("unsupported pull policy %q", r.pullPolicy)
+	}
+}
+
+func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {
+	args := []string{"run", "--rm", "--name", containerName}
+	if timeoutSec > 0 {
+		args = append(args, "--stop-timeout", strconv.Itoa(timeoutSec))
+	}
+	if strings.TrimSpace(paramsJSON) != "" {
+		args = append(args, "-e", "JOB_PARAMS="+paramsJSON)
+	}
+	args = append(args, imageRef)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start docker run: %w", err)
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = exec.CommandContext(stopCtx, "docker", "stop", containerName).Run()
+		cancelStop()
+		_ = cmd.Process.Kill()
+		_ = <-waitCh
+		return ctx.Err()
+	case err := <-waitCh:
+		return err
 	}
 }
 
