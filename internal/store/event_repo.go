@@ -72,10 +72,10 @@ func (r *EventRepo) ListByRun(ctx context.Context, runID int64) ([]model.RunEven
 
 func scanRunEvent(scanner interface{ Scan(...any) error }) (*model.RunEvent, error) {
 	var (
-		event       model.RunEvent
-		eventType   string
-		message     sql.NullString
-		createdAt   string
+		event     model.RunEvent
+		eventType string
+		message   sql.NullString
+		createdAt string
 	)
 
 	if err := scanner.Scan(&event.ID, &event.RunID, &eventType, &message, &createdAt); err != nil {

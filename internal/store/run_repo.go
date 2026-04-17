@@ -234,13 +234,13 @@ func (r *RunRepo) ListPending(ctx context.Context, limit int) ([]model.Run, erro
 
 func scanRun(scanner interface{ Scan(...any) error }) (*model.Run, error) {
 	var (
-		run                                          model.Run
-		status                                       string
-		scheduledAt                                  string
-		startedAt, finishedAt, errorMessage          sql.NullString
-		exitCode                                     sql.NullInt64
-		logPath, resultPath                          sql.NullString
-		createdAt, updatedAt                         string
+		run                                 model.Run
+		status                              string
+		scheduledAt                         string
+		startedAt, finishedAt, errorMessage sql.NullString
+		exitCode                            sql.NullInt64
+		logPath, resultPath                 sql.NullString
+		createdAt, updatedAt                string
 	)
 
 	if err := scanner.Scan(

@@ -252,13 +252,13 @@ func (r *JobRepo) ListDue(ctx context.Context, before time.Time) ([]model.Job, e
 
 func scanJob(scanner interface{ Scan(...any) error }) (*model.Job, error) {
 	var (
-		job                                     model.Job
-		enabled                                 int
+		job                                      model.Job
+		enabled                                  int
 		sourceType, scheduleType, concurrency    string
 		description, imageDigest                 sql.NullString
 		scheduleExpr, nextRunAt, lastScheduledAt sql.NullString
-		intervalSec                             sql.NullInt64
-		paramsJSON                              sql.NullString
+		intervalSec                              sql.NullInt64
+		paramsJSON                               sql.NullString
 		createdAt, updatedAt                     string
 	)
 
