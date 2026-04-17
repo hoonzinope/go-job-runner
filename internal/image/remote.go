@@ -42,9 +42,12 @@ func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
 	return &RemoteSource{
 		endpoint:   strings.TrimRight(cfg.Endpoint, "/"),
 		pullPrefix: pullPrefix,
-		client:     &http.Client{Transport: transport},
-		tagCache:   make(map[string]tagCacheEntry),
-		cacheTTL:   5 * time.Minute,
+		client: &http.Client{
+			Transport: transport,
+			Timeout:   30 * time.Second,
+		},
+		tagCache: make(map[string]tagCacheEntry),
+		cacheTTL: 5 * time.Minute,
 	}
 }
 
@@ -146,13 +149,18 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 }
 
 func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate, error) {
-	repo, tag := splitImageRef(imageRef)
-	if repo == "" || tag == "" {
+	repo, ref, isDigest := splitImageRef(imageRef)
+	if repo == "" || ref == "" {
 		return nil, fmt.Errorf("invalid remote image ref %q", imageRef)
 	}
-	pullRef := fmt.Sprintf("%s/%s:%s", s.pullPrefix, repo, tag)
+	var pullRef string
+	if isDigest {
+		pullRef = fmt.Sprintf("%s/%s@%s", s.pullPrefix, repo, ref)
+	} else {
+		pullRef = fmt.Sprintf("%s/%s:%s", s.pullPrefix, repo, ref)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/v2/"+repo+"/manifests/"+url.PathEscape(tag), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/v2/"+repo+"/manifests/"+url.PathEscape(ref), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -256,11 +264,14 @@ func (s *RemoteSource) tagsForRepo(ctx context.Context, repo string) ([]string, 
 	return tags, nil
 }
 
-func splitImageRef(ref string) (string, string) {
+func splitImageRef(ref string) (string, string, bool) {
+	if repo, digest, ok := strings.Cut(ref, "@"); ok {
+		return repo, digest, true
+	}
 	lastColon := strings.LastIndex(ref, ":")
 	lastSlash := strings.LastIndex(ref, "/")
 	if lastColon <= lastSlash || lastColon == -1 {
-		return ref, "latest"
+		return ref, "latest", false
 	}
-	return ref[:lastColon], ref[lastColon+1:]
+	return ref[:lastColon], ref[lastColon+1:], false
 }

@@ -90,14 +90,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}
 	args = append(args, pullRef)
 
-	runCtx := ctx
-	cancelRun := func() {}
-	if job.TimeoutSec > 0 {
-		runCtx, cancelRun = context.WithTimeout(ctx, time.Duration(job.TimeoutSec)*time.Second)
-	}
-	defer cancelRun()
-
-	cmd := exec.CommandContext(runCtx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
@@ -116,13 +109,13 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}()
 
 	select {
-	case <-runCtx.Done():
+	case <-ctx.Done():
 		stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
 		_ = exec.CommandContext(stopCtx, "docker", "stop", containerName).Run()
 		cancelStop()
 		_ = cmd.Process.Kill()
 		_ = <-waitCh
-		return nil, runCtx.Err()
+		return nil, ctx.Err()
 	case err := <-waitCh:
 		if err != nil {
 			exitCode := exitCodeFromErr(err)
