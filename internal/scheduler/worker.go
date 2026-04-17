@@ -140,6 +140,18 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 				EventType: model.RunEventTypeTimeout,
 				Message:   &msg,
 			})
+			if err != nil {
+				return err
+			}
+			if retryRun, retryEvent, ok := buildRetryRun(job, run); ok {
+				if _, err := tx.Runs.Create(context.Background(), retryRun); err != nil {
+					return err
+				}
+				retryEvent.RunID = retryRun.ID
+				if _, err := tx.Events.Create(context.Background(), retryEvent); err != nil {
+					return err
+				}
+			}
 			return err
 		case errors.Is(runCtx.Err(), context.Canceled):
 			msg := "context cancelled"
@@ -166,6 +178,18 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 				EventType: model.RunEventTypeFailed,
 				Message:   &msg,
 			})
+			if err != nil {
+				return err
+			}
+			if retryRun, retryEvent, ok := buildRetryRun(job, run); ok {
+				if _, err := tx.Runs.Create(context.Background(), retryRun); err != nil {
+					return err
+				}
+				retryEvent.RunID = retryRun.ID
+				if _, err := tx.Events.Create(context.Background(), retryEvent); err != nil {
+					return err
+				}
+			}
 			return err
 		}
 	}); err != nil {
@@ -173,4 +197,29 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	}
 
 	s.signalDispatch()
+}
+
+func buildRetryRun(job *model.Job, currentRun *model.Run) (*model.Run, *model.RunEvent, bool) {
+	if job == nil || currentRun == nil {
+		return nil, nil, false
+	}
+	if job.RetryLimit <= 0 {
+		return nil, nil, false
+	}
+	if currentRun.Attempt >= job.RetryLimit {
+		return nil, nil, false
+	}
+
+	retryRun := &model.Run{
+		JobID:       job.ID,
+		ScheduledAt: currentRun.ScheduledAt.UTC(),
+		Status:      model.RunStatusPending,
+		Attempt:     currentRun.Attempt + 1,
+	}
+	msg := fmt.Sprintf("retry scheduled from run %d attempt %d", currentRun.ID, currentRun.Attempt)
+	retryEvent := &model.RunEvent{
+		EventType: model.RunEventTypeCreated,
+		Message:   &msg,
+	}
+	return retryRun, retryEvent, true
 }

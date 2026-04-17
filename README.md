@@ -20,6 +20,7 @@ Requires only SQLite and a Docker socket — no external dependencies.
 - **Cron / Interval 스케줄** — cron expression 또는 초 단위 interval 지원
 - **Concurrency Policy** — `forbid` (중복 실행 방지) / `allow` (독립 실행)
 - **Retry / Timeout** — 실패·타임아웃 시 재시도, 실행 시간 제한
+  - retry가 발생하면 새로운 Run 레코드가 생성되며, `/api/v1/runs`와 `/api/v1/jobs/:id/runs`에서 그대로 조회됩니다.
 - **Run 이력 관리** — 실행 상태, 로그 파일, 이벤트 스트림 조회
 - **Run Cancel** — 실행 중인 컨테이너 즉시 중단
 - **Web UI** — 작업 등록·수정·즉시 실행, 실행 이력 및 로그 조회
