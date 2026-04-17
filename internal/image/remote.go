@@ -31,6 +31,8 @@ type tagCacheEntry struct {
 	fetchedAt time.Time
 }
 
+const maxConcurrentTagFetches = 8
+
 func NewRemoteSource(cfg config.ImageRemoteConfig) *RemoteSource {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.Insecure {
@@ -79,8 +81,8 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	sem := make(chan struct{}, 8)
-	results := make(chan repoTags, len(filteredRepos))
+	sem := make(chan struct{}, maxConcurrentTagFetches)
+	results := make(chan repoTags, 64)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 

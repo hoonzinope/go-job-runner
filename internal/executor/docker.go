@@ -83,7 +83,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}
 	defer logFile.Close()
 
-	containerName := fmt.Sprintf("job-runner-run-%d-%d-%d", run.JobID, run.ID, time.Now().UTC().UnixNano())
+	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
 	args := []string{"run", "--rm", "--name", containerName}
 	if job.TimeoutSec > 0 {
 		args = append(args, "--stop-timeout", strconv.Itoa(job.TimeoutSec))

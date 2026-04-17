@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/hoonzinope/go-job-runner/internal/model"
@@ -64,7 +65,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			return nil
 		}
 	}); err != nil {
-		fmt.Printf("scheduler worker start error (run=%d): %v\n", runID, err)
+		log.Printf("scheduler worker start error (run=%d): %v", runID, err)
 		return
 	}
 
@@ -82,7 +83,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			})
 			return err
 		}); err != nil {
-			fmt.Printf("scheduler worker cancel finalize error (run=%d): %v\n", runID, err)
+			log.Printf("scheduler worker cancel finalize error (run=%d): %v", runID, err)
 		}
 		s.signalDispatch()
 		return
@@ -168,7 +169,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			return err
 		}
 	}); err != nil {
-		fmt.Printf("scheduler worker finalize error (run=%d): %v\n", runID, err)
+		log.Printf("scheduler worker finalize error (run=%d): %v", runID, err)
 	}
 
 	s.signalDispatch()
