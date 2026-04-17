@@ -25,6 +25,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	}
 
 	startedAt := time.Now().UTC()
+	shouldStop := false
 	if err := s.store.WithinTx(ctx, func(tx *store.TxStore) error {
 		freshRun, err := tx.Runs.Get(ctx, runID)
 		if err != nil {
@@ -33,6 +34,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 
 		switch freshRun.Status {
 		case model.RunStatusCancelled:
+			shouldStop = true
 			return nil
 		case model.RunStatusCancelling:
 			finishedAt := time.Now().UTC()
@@ -45,6 +47,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 				EventType: model.RunEventTypeCancelled,
 				Message:   &msg,
 			})
+			shouldStop = true
 			return err
 		case model.RunStatusPending:
 			run.StartedAt = &startedAt
@@ -66,6 +69,11 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 		}
 	}); err != nil {
 		log.Printf("scheduler worker start error (run=%d): %v", runID, err)
+		return
+	}
+
+	if shouldStop {
+		s.signalDispatch()
 		return
 	}
 

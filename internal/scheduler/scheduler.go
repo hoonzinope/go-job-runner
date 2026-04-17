@@ -113,6 +113,9 @@ func (s *Scheduler) maxWorkers() int {
 }
 
 func (s *Scheduler) acquireWorkerToken(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	select {
 	case s.workerTokens <- struct{}{}:
 		return true
