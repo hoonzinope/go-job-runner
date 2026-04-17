@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/hoonzinope/go-job-runner/internal/model"
@@ -22,6 +24,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 		return
 	}
 
+	startedAt := time.Now().UTC()
 	if err := s.store.WithinTx(ctx, func(tx *store.TxStore) error {
 		freshRun, err := tx.Runs.Get(ctx, runID)
 		if err != nil {
@@ -44,7 +47,6 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			})
 			return err
 		case model.RunStatusPending:
-			startedAt := time.Now().UTC()
 			run.StartedAt = &startedAt
 			if err := tx.Runs.UpdateStatus(ctx, runID, model.RunStatusRunning, &startedAt, nil, nil, nil); err != nil {
 				return err
@@ -57,19 +59,20 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			})
 			return err
 		case model.RunStatusRunning:
+			run.StartedAt = freshRun.StartedAt
 			return nil
 		default:
 			return nil
 		}
 	}); err != nil {
-		fmt.Printf("scheduler worker start error (run=%d): %v\n", runID, err)
+		log.Printf("scheduler worker start error (run=%d): %v", runID, err)
 		return
 	}
 
 	if ctx.Err() != nil {
-		_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-			finishedAt := time.Now().UTC()
-			msg := "context cancelled"
+		finishedAt := time.Now().UTC()
+		msg := "context cancelled"
+		if err := s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
 			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusCancelled, run.StartedAt, &finishedAt, run.ExitCode, run.ErrorMessage); err != nil {
 				return err
 			}
@@ -79,16 +82,83 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 				Message:   &msg,
 			})
 			return err
-		})
+		}); err != nil {
+			log.Printf("scheduler worker cancel finalize error (run=%d): %v", runID, err)
+		}
 		s.signalDispatch()
 		return
 	}
 
-	if err := s.newExecutor().Execute(ctx, job.ID, run.ID); err != nil {
-		finishedAt := time.Now().UTC()
-		msg := err.Error()
-		_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusFailed, run.StartedAt, &finishedAt, nil, &msg); err != nil {
+	runCtx := ctx
+	cancelRun := func() {}
+	if job.TimeoutSec > 0 {
+		runCtx, cancelRun = context.WithTimeout(ctx, time.Duration(job.TimeoutSec)*time.Second)
+	}
+	defer cancelRun()
+
+	result, execErr := s.newExecutor().Execute(runCtx, job, run)
+	finishedAt := time.Now().UTC()
+
+	if result != nil && result.LogPath != "" {
+		run.LogPath = &result.LogPath
+	}
+	if result != nil && result.ResultPath != "" {
+		run.ResultPath = &result.ResultPath
+	}
+
+	if err := s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
+		if result != nil {
+			if err := tx.Runs.UpdateLogArtifacts(context.Background(), runID, run.LogPath, run.ResultPath); err != nil {
+				return err
+			}
+		}
+
+		switch {
+		case execErr == nil:
+			exitCode := 0
+			msg := "run completed"
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusSuccess, run.StartedAt, &finishedAt, &exitCode, nil); err != nil {
+				return err
+			}
+			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
+				RunID:     runID,
+				EventType: model.RunEventTypeCompleted,
+				Message:   &msg,
+			})
+			return err
+		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+			exitCode := -1
+			msg := "job timeout"
+			if result != nil {
+				exitCode = result.ExitCode
+			}
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusTimeout, run.StartedAt, &finishedAt, &exitCode, &msg); err != nil {
+				return err
+			}
+			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
+				RunID:     runID,
+				EventType: model.RunEventTypeTimeout,
+				Message:   &msg,
+			})
+			return err
+		case errors.Is(runCtx.Err(), context.Canceled):
+			msg := "context cancelled"
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusCancelled, run.StartedAt, &finishedAt, nil, &msg); err != nil {
+				return err
+			}
+			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
+				RunID:     runID,
+				EventType: model.RunEventTypeCancelled,
+				Message:   &msg,
+			})
+			return err
+		default:
+			exitCode := -1
+			if result != nil {
+				exitCode = result.ExitCode
+			}
+			msg := execErr.Error()
+			if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusFailed, run.StartedAt, &finishedAt, &exitCode, &msg); err != nil {
 				return err
 			}
 			_, err := tx.Events.Create(context.Background(), &model.RunEvent{
@@ -97,24 +167,10 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 				Message:   &msg,
 			})
 			return err
-		})
-		s.signalDispatch()
-		return
+		}
+	}); err != nil {
+		log.Printf("scheduler worker finalize error (run=%d): %v", runID, err)
 	}
 
-	finishedAt := time.Now().UTC()
-	exitCode := 0
-	msg := "run completed"
-	_ = s.store.WithinTx(context.Background(), func(tx *store.TxStore) error {
-		if err := tx.Runs.UpdateStatus(context.Background(), runID, model.RunStatusSuccess, run.StartedAt, &finishedAt, &exitCode, nil); err != nil {
-			return err
-		}
-		_, err := tx.Events.Create(context.Background(), &model.RunEvent{
-			RunID:     runID,
-			EventType: model.RunEventTypeCompleted,
-			Message:   &msg,
-		})
-		return err
-	})
 	s.signalDispatch()
 }

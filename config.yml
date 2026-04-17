@@ -6,3 +6,15 @@ store:
   sqlite_path: ./data/app.db
   log_root: ./data/logs
   artifact_root: ./data/artifacts
+
+image:
+  allowed_sources:
+    - local
+    - remote
+  default_source: local
+  pull_policy: if_not_present
+  allowed_prefixes:
+    - jobs/
+  remote:
+    endpoint: http://registry:5000
+    insecure: true
