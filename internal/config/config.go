@@ -6,9 +6,11 @@ type ServerConfig struct {
 }
 
 type StoreConfig struct {
-	SQLitePath   string `yaml:"sqlite_path"`
-	LogRoot      string `yaml:"log_root"`
-	ArtifactRoot string `yaml:"artifact_root"`
+	SQLitePath        string `yaml:"sqlite_path"`
+	LogRoot           string `yaml:"log_root"`
+	ArtifactRoot      string `yaml:"artifact_root"`
+	LogPathPattern    string `yaml:"log_path_pattern"`
+	ResultPathPattern string `yaml:"result_path_pattern"`
 }
 
 type SchedulerConfig struct {

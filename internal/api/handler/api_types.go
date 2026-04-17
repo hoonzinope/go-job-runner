@@ -96,6 +96,17 @@ type logResponse struct {
 	Content string `json:"content"`
 }
 
+type resultResponse struct {
+	JobID       int64     `json:"jobId"`
+	RunID       int64     `json:"runId"`
+	ImageRef    string    `json:"imageRef"`
+	PullRef     string    `json:"pullRef"`
+	ImageDigest *string   `json:"imageDigest,omitempty"`
+	ExitCode    int       `json:"exitCode"`
+	Message     string    `json:"message"`
+	FinishedAt  time.Time `json:"finishedAt"`
+}
+
 type imageCandidateResponse struct {
 	SourceType string  `json:"sourceType"`
 	ImageRef   string  `json:"imageRef"`

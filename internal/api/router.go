@@ -10,6 +10,7 @@ import (
 	"github.com/hoonzinope/go-job-runner/internal/api/handler"
 	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/image"
+	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/scheduler"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
@@ -39,7 +40,7 @@ func (s *APIServer) setupRouter() *gin.Engine {
 	api := router.Group("/api/v1")
 	{
 		jobHandler := handler.NewJobHandler(s.Store, s.Scheduler)
-		runHandler := handler.NewRunHandler(s.Store)
+		runHandler := handler.NewRunHandler(s.Store, logwriter.NewReader())
 		imageHandler := handler.NewImageHandler(s.ImageResolver)
 
 		api.GET("/jobs", jobHandler.ListJobs)
@@ -55,6 +56,7 @@ func (s *APIServer) setupRouter() *gin.Engine {
 		api.POST("/runs/:runId/cancel", runHandler.CancelRun)
 		api.GET("/runs/:runId/events", runHandler.ListRunEvents)
 		api.GET("/runs/:runId/logs", runHandler.GetRunLogs)
+		api.GET("/runs/:runId/result", runHandler.GetRunResult)
 
 		api.GET("/images", imageHandler.ListImages)
 		api.GET("/images/resolve", imageHandler.ResolveImage)

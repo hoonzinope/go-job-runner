@@ -5,4 +5,6 @@ server:
 store:
   sqlite_path: /data/app.db
   log_root: /data/logs
+  log_path_pattern: job-%d/run-%d/run.log
   artifact_root: /data/artifacts
+  result_path_pattern: job-%d/run-%d/result.json

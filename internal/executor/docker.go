@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/image"
+	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
 )
 
@@ -25,18 +25,18 @@ type ExecutionResult struct {
 }
 
 type DockerExecutor struct {
-	logRoot      string
-	artifactRoot string
 	pullPolicy   string
 	resolver     *image.Resolver
+	logWriter    *logwriter.Writer
+	resultWriter *logwriter.ResultWriter
 }
 
 func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig) *DockerExecutor {
 	return &DockerExecutor{
-		logRoot:      storeCfg.LogRoot,
-		artifactRoot: storeCfg.ArtifactRoot,
 		pullPolicy:   imageCfg.PullPolicy,
 		resolver:     image.NewResolver(imageCfg),
+		logWriter:    logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
+		resultWriter: logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
 	}
 }
 
@@ -65,23 +65,17 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		return nil, err
 	}
 
-	logPath, resultPath, err := e.preparePaths(job, run)
+	logFile, logPath, err := e.logWriter.Open(job.ID, run.ID)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create log dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(resultPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create artifact dir: %w", err)
-	}
-
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open log file: %w", err)
-	}
 	defer logFile.Close()
+
+	resultFile, resultPath, err := e.resultWriter.Open(job.ID, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer resultFile.Close()
 
 	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
 	args := []string{"run", "--rm", "--name", containerName}
@@ -124,7 +118,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		if err != nil {
 			exitCode := exitCodeFromErr(err)
 			if exitCode == -1 {
-				if writeErr := e.writeResult(resultPath, run, job, candidate, exitCode, err.Error()); writeErr != nil {
+				if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
+					JobID:       job.ID,
+					RunID:       run.ID,
+					ImageRef:    candidate.ImageRef,
+					PullRef:     candidate.PullRef,
+					ImageDigest: candidate.Digest,
+					ExitCode:    exitCode,
+					Message:     err.Error(),
+					FinishedAt:  time.Now().UTC(),
+				}); writeErr != nil {
 					return &ExecutionResult{
 						ExitCode:    exitCode,
 						LogPath:     logPath,
@@ -139,7 +142,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 					ImageDigest: candidate.Digest,
 				}, err
 			}
-			if writeErr := e.writeResult(resultPath, run, job, candidate, exitCode, err.Error()); writeErr != nil {
+			if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
+				JobID:       job.ID,
+				RunID:       run.ID,
+				ImageRef:    candidate.ImageRef,
+				PullRef:     candidate.PullRef,
+				ImageDigest: candidate.Digest,
+				ExitCode:    exitCode,
+				Message:     err.Error(),
+				FinishedAt:  time.Now().UTC(),
+			}); writeErr != nil {
 				return &ExecutionResult{
 					ExitCode:    exitCode,
 					LogPath:     logPath,
@@ -154,7 +166,16 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 				ImageDigest: candidate.Digest,
 			}, err
 		}
-		if writeErr := e.writeResult(resultPath, run, job, candidate, 0, "success"); writeErr != nil {
+		if writeErr := e.writeResult(resultFile, &logwriter.ResultRecord{
+			JobID:       job.ID,
+			RunID:       run.ID,
+			ImageRef:    candidate.ImageRef,
+			PullRef:     candidate.PullRef,
+			ImageDigest: candidate.Digest,
+			ExitCode:    0,
+			Message:     "success",
+			FinishedAt:  time.Now().UTC(),
+		}); writeErr != nil {
 			return &ExecutionResult{
 				ExitCode:    0,
 				LogPath:     logPath,
@@ -195,32 +216,21 @@ func (e *DockerExecutor) ensureImage(ctx context.Context, imageRef string) error
 	}
 }
 
-func (e *DockerExecutor) preparePaths(job *model.Job, run *model.Run) (string, string, error) {
-	base := filepath.Join(e.logRoot, fmt.Sprintf("job-%d", job.ID), fmt.Sprintf("run-%d", run.ID))
-	logPath := filepath.Join(base, "run.log")
-	resultPath := filepath.Join(e.artifactRoot, fmt.Sprintf("job-%d", job.ID), fmt.Sprintf("run-%d", run.ID), "result.json")
-	return logPath, resultPath, nil
-}
-
-func (e *DockerExecutor) writeResult(resultPath string, run *model.Run, job *model.Job, candidate *image.Candidate, exitCode int, message string) error {
-	if err := os.MkdirAll(filepath.Dir(resultPath), 0o755); err != nil {
-		return err
-	}
-	payload := map[string]any{
-		"jobId":       job.ID,
-		"runId":       run.ID,
-		"imageRef":    candidate.ImageRef,
-		"pullRef":     candidate.PullRef,
-		"imageDigest": candidate.Digest,
-		"exitCode":    exitCode,
-		"message":     message,
-		"finishedAt":  time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	data, err := json.MarshalIndent(payload, "", "  ")
+func (e *DockerExecutor) writeResult(resultFile *os.File, record *logwriter.ResultRecord) error {
+	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(resultPath, data, 0o644)
+	if _, err := resultFile.Seek(0, 0); err != nil {
+		return err
+	}
+	if err := resultFile.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := resultFile.Write(data); err != nil {
+		return err
+	}
+	return resultFile.Sync()
 }
 
 func exitCodeFromErr(err error) int {

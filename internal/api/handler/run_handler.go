@@ -4,24 +4,27 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type RunHandler struct {
-	store *store.Store
+	store  *store.Store
+	reader *logwriter.Reader
 }
 
-func NewRunHandler(st *store.Store) *RunHandler {
-	return &RunHandler{store: st}
+func NewRunHandler(st *store.Store, reader *logwriter.Reader) *RunHandler {
+	if reader == nil {
+		reader = logwriter.NewReader()
+	}
+	return &RunHandler{store: st, reader: reader}
 }
 
 func (h *RunHandler) ListRuns(c *gin.Context) {
@@ -161,12 +164,41 @@ func (h *RunHandler) GetRunLogs(c *gin.Context) {
 	limit := parseInt64Default(c.Query("limit"), 0)
 	tail := parseInt64Default(c.Query("tail"), 0)
 
-	content, start, size, err := readLogContent(*run.LogPath, offset, limit, tail)
+	content, start, size, err := h.reader.ReadContent(*run.LogPath, offset, limit, tail)
 	if err != nil {
 		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, logResponse{RunID: runID, Offset: start, Size: size, Content: content})
+}
+
+func (h *RunHandler) GetRunResult(c *gin.Context) {
+	runID, err := parseIntParam(c, "runId")
+	if err != nil {
+		badRequest(c, fmt.Errorf("invalid runId: %w", err))
+		return
+	}
+
+	run, err := h.store.Runs.Get(c.Request.Context(), runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			notFound(c, fmt.Errorf("run %d not found", runID))
+			return
+		}
+		internalError(c, err)
+		return
+	}
+	if run.ResultPath == nil || *run.ResultPath == "" {
+		c.JSON(http.StatusOK, resultResponse{})
+		return
+	}
+
+	var payload resultResponse
+	if err := h.reader.ReadJSON(*run.ResultPath, &payload); err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, payload)
 }
 
 func parseInt64Default(value string, fallback int64) int64 {
@@ -178,50 +210,6 @@ func parseInt64Default(value string, fallback int64) int64 {
 		return fallback
 	}
 	return n
-}
-
-func readLogContent(path string, offset, limit, tail int64) (string, int64, int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return "", 0, 0, err
-	}
-
-	start := offset
-	if tail > 0 {
-		if tail > info.Size() {
-			tail = info.Size()
-		}
-		start = info.Size() - tail
-	}
-	if start < 0 {
-		start = 0
-	}
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return "", 0, 0, err
-	}
-
-	var data []byte
-	if limit > 0 {
-		data = make([]byte, limit)
-		n, err := io.ReadFull(f, data)
-		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return "", 0, 0, err
-		}
-		data = data[:n]
-	} else {
-		data, err = io.ReadAll(f)
-		if err != nil {
-			return "", 0, 0, err
-		}
-	}
-
-	return string(data), start, len(data), nil
 }
 
 func toRunResponse(run *model.Run) runResponse {
