@@ -88,16 +88,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	if job.TimeoutSec > 0 {
 		args = append(args, "--stop-timeout", strconv.Itoa(job.TimeoutSec))
 	}
+	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
+		// Pass parameters into the container, not the docker CLI process.
+		args = append(args, "-e", "JOB_PARAMS="+params)
+	}
 	args = append(args, pullRef)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	if params := jobParamsJSON(job); strings.TrimSpace(params) != "" {
-		// Jobs are image-driven; params are made available as env vars for the container.
-		// The executor keeps this simple by serializing them into a single env var.
-		cmd.Env = append(os.Environ(), "JOB_PARAMS="+params)
-	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start docker run: %w", err)
@@ -115,7 +114,12 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 		cancelStop()
 		_ = cmd.Process.Kill()
 		_ = <-waitCh
-		return nil, ctx.Err()
+		return &ExecutionResult{
+			ExitCode:    -1,
+			LogPath:     logPath,
+			ResultPath:  resultPath,
+			ImageDigest: candidate.Digest,
+		}, ctx.Err()
 	case err := <-waitCh:
 		if err != nil {
 			exitCode := exitCodeFromErr(err)
@@ -175,7 +179,15 @@ func (e *DockerExecutor) ensureImage(ctx context.Context, imageRef string) error
 		}
 		fallthrough
 	case "always":
-		return exec.CommandContext(ctx, "docker", "pull", imageRef).Run()
+		out, err := exec.CommandContext(ctx, "docker", "pull", imageRef).CombinedOutput()
+		if err != nil {
+			trimmed := strings.TrimSpace(string(out))
+			if trimmed != "" {
+				return fmt.Errorf("docker pull %q: %w: %s", imageRef, err, trimmed)
+			}
+			return fmt.Errorf("docker pull %q: %w", imageRef, err)
+		}
+		return nil
 	case "never":
 		return nil
 	default:

@@ -2,7 +2,9 @@ package image
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,6 +138,13 @@ func (s *RemoteSource) ListCandidates(ctx context.Context, q, prefix string) ([]
 			}
 		case item, ok := <-results:
 			if !ok {
+				select {
+				case err := <-errCh:
+					if err != nil {
+						return nil, err
+					}
+				default:
+				}
 				return candidates, nil
 			}
 			candidates = append(candidates, item.items...)
@@ -176,10 +185,15 @@ func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate
 		return nil, fmt.Errorf("remote manifest status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read remote manifest body: %w", err)
+	}
+
 	digest := resp.Header.Get("Docker-Content-Digest")
 	if digest == "" {
 		var payload map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
+		if err := json.Unmarshal(body, &payload); err == nil {
 			if v, ok := payload["config"].(map[string]any); ok {
 				if d, ok := v["digest"].(string); ok {
 					digest = d
@@ -188,32 +202,48 @@ func (s *RemoteSource) Resolve(ctx context.Context, imageRef string) (*Candidate
 		}
 	}
 	if digest == "" {
-		return &Candidate{SourceType: "remote", ImageRef: imageRef, PullRef: pullRef}, nil
+		sum := sha256.Sum256(body)
+		digest = "sha256:" + hex.EncodeToString(sum[:])
 	}
 	return &Candidate{SourceType: "remote", ImageRef: imageRef, PullRef: pullRef, Digest: &digest}, nil
 }
 
 func (s *RemoteSource) listRepositories(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/v2/_catalog?n=1000", nil)
-	if err != nil {
-		return nil, err
+	var repos []string
+	nextURL := s.endpoint + "/v2/_catalog?n=1000"
+
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("remote catalog request: %w", err)
+		}
+
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read remote catalog: %w", readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			trimmed := body
+			if len(trimmed) > 512 {
+				trimmed = trimmed[:512]
+			}
+			return nil, fmt.Errorf("remote catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(trimmed)))
+		}
+		var payload struct {
+			Repositories []string `json:"repositories"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, fmt.Errorf("decode remote catalog: %w", err)
+		}
+		repos = append(repos, payload.Repositories...)
+		nextURL = nextCatalogLink(resp.Request.URL, resp.Header.Values("Link"))
 	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("remote catalog request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("remote catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var payload struct {
-		Repositories []string `json:"repositories"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode remote catalog: %w", err)
-	}
-	return payload.Repositories, nil
+	return repos, nil
 }
 
 func (s *RemoteSource) listTags(ctx context.Context, repo string) ([]string, error) {
@@ -274,4 +304,29 @@ func splitImageRef(ref string) (string, string, bool) {
 		return ref, "latest", false
 	}
 	return ref[:lastColon], ref[lastColon+1:], false
+}
+
+func nextCatalogLink(base *url.URL, values []string) string {
+	for _, value := range values {
+		parts := strings.Split(value, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if !strings.Contains(part, `rel="next"`) {
+				continue
+			}
+			start := strings.Index(part, "<")
+			end := strings.Index(part, ">")
+			if start >= 0 && end > start+1 {
+				next, err := url.Parse(part[start+1 : end])
+				if err != nil {
+					return ""
+				}
+				if base != nil {
+					return base.ResolveReference(next).String()
+				}
+				return next.String()
+			}
+		}
+	}
+	return ""
 }
