@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -128,12 +127,5 @@ func (s *Scheduler) releaseWorkerToken() {
 	select {
 	case <-s.workerTokens:
 	default:
-	}
-}
-
-func (s *Scheduler) nextRunAfter(jobType string, scheduleExpr *string, intervalSec *int, timezone string, from time.Time) (time.Time, error) {
-	switch jobType {
-	default:
-		return time.Time{}, fmt.Errorf("unsupported schedule type: %s", jobType)
 	}
 }
