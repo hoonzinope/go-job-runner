@@ -1,0 +1,93 @@
+{{ define "job_form_content" }}
+<form class="grid" method="post">
+  <section class="card">
+    <div class="actions" style="justify-content: space-between; align-items: center;">
+      <div>
+        <div class="muted">Mode</div>
+        <strong>{{ .Mode }}</strong>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/jobs">Back to list</a>
+        {{ if eq .Mode "edit" }}<a class="btn" href="/jobs/{{ .Job.ID }}">Cancel</a>{{ end }}
+        <button class="btn primary" type="submit">Save</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">Job Definition</h2>
+    <div class="grid two">
+      <div class="field">
+        <label for="name">Name</label>
+        <input id="name" name="name" value="{{ .Job.Name }}" placeholder="task-name">
+      </div>
+      <div class="field">
+        <label for="enabled">Enabled</label>
+        <select id="enabled" name="enabled">
+          <option value="true" {{ if .Job.Enabled }}selected{{ end }}>Enabled</option>
+          <option value="false" {{ if not .Job.Enabled }}selected{{ end }}>Disabled</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sourceType">Source Type</label>
+        <select id="sourceType" name="sourceType">
+          <option value="local" {{ if eq .Job.SourceType "local" }}selected{{ end }}>local</option>
+          <option value="remote" {{ if eq .Job.SourceType "remote" }}selected{{ end }}>remote</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="imageRef">Image Ref</label>
+        <input id="imageRef" name="imageRef" value="{{ .Job.ImageRef }}" placeholder="jobs/example:latest">
+      </div>
+      <div class="field">
+        <label for="scheduleType">Schedule Type</label>
+        <select id="scheduleType" name="scheduleType">
+          <option value="cron" {{ if eq .Job.ScheduleType "cron" }}selected{{ end }}>cron</option>
+          <option value="interval" {{ if eq .Job.ScheduleType "interval" }}selected{{ end }}>interval</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="timezone">Timezone</label>
+        <input id="timezone" name="timezone" value="{{ .Job.Timezone }}" placeholder="UTC">
+      </div>
+      <div class="field">
+        <label for="scheduleExpr">Cron Expression</label>
+        <input id="scheduleExpr" name="scheduleExpr" value="{{ inputString .Job.ScheduleExpr }}" placeholder="*/5 * * * *">
+      </div>
+      <div class="field">
+        <label for="intervalSec">Interval Seconds</label>
+        <input id="intervalSec" name="intervalSec" value="{{ inputInt .Job.IntervalSec }}" placeholder="60">
+      </div>
+      <div class="field">
+        <label for="concurrencyPolicy">Concurrency Policy</label>
+        <select id="concurrencyPolicy" name="concurrencyPolicy">
+          <option value="forbid" {{ if eq .Job.ConcurrencyPolicy "forbid" }}selected{{ end }}>forbid</option>
+          <option value="allow" {{ if eq .Job.ConcurrencyPolicy "allow" }}selected{{ end }}>allow</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="retryLimit">Retry Limit</label>
+        <input id="retryLimit" name="retryLimit" value="{{ .Job.RetryLimit }}" type="number" min="0">
+      </div>
+      <div class="field">
+        <label for="timeoutSec">Timeout Sec</label>
+        <input id="timeoutSec" name="timeoutSec" value="{{ .Job.TimeoutSec }}" type="number" min="0">
+      </div>
+      <div class="field" style="grid-column: 1 / -1;">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="Optional note">{{ inputString .Job.Description }}</textarea>
+      </div>
+      <div class="field" style="grid-column: 1 / -1;">
+        <label for="params">Params JSON</label>
+        <textarea id="params" name="params" placeholder='{"key":"value"}'>{{ inputString .Job.ParamsJSON }}</textarea>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">Image Panel</h2>
+    <p class="muted">This area will later show local/remote candidates and resolve results for the selected image ref.</p>
+    <div class="empty">Image candidate lookup and resolve preview are wired in the API, but the form interaction is still a stub.</div>
+  </section>
+</form>
+{{ end }}

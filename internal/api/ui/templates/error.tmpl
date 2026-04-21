@@ -1,0 +1,10 @@
+{{ define "error_content" }}
+<section class="card">
+  <h2 class="section-title">Unable to load page</h2>
+  <p class="muted">{{ .Message }}</p>
+  <div class="actions">
+    <a class="btn primary" href="/jobs">Back to Jobs</a>
+    <a class="btn" href="/runs">Go to Runs</a>
+  </div>
+</section>
+{{ end }}

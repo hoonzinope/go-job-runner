@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hoonzinope/go-job-runner/internal/api/handler"
+	webui "github.com/hoonzinope/go-job-runner/internal/api/ui"
 	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/image"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
@@ -36,6 +37,8 @@ func NewAPIServer(cfg *config.Config, st *store.Store, sch *scheduler.Scheduler)
 func (s *APIServer) setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/health", handler.HealthzHandler)
+	ui := webui.New(s.Store, logwriter.NewReader())
+	ui.RegisterRoutes(router)
 
 	api := router.Group("/api/v1")
 	{

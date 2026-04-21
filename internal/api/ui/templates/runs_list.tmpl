@@ -1,0 +1,82 @@
+{{ define "runs_list_content" }}
+<section class="card">
+  <form method="get" action="/runs" class="grid three">
+    <div class="field">
+      <label for="jobId">Job ID</label>
+      <input id="jobId" name="jobId" value="{{ .Filter.JobID }}" placeholder="Optional job ID">
+    </div>
+    <div class="field">
+      <label for="status">Status</label>
+      <select id="status" name="status">
+        <option value="" {{ if eq .Filter.Status "" }}selected{{ end }}>All</option>
+        <option value="pending" {{ if eq .Filter.Status "pending" }}selected{{ end }}>pending</option>
+        <option value="running" {{ if eq .Filter.Status "running" }}selected{{ end }}>running</option>
+        <option value="cancelling" {{ if eq .Filter.Status "cancelling" }}selected{{ end }}>cancelling</option>
+        <option value="success" {{ if eq .Filter.Status "success" }}selected{{ end }}>success</option>
+        <option value="failed" {{ if eq .Filter.Status "failed" }}selected{{ end }}>failed</option>
+        <option value="timeout" {{ if eq .Filter.Status "timeout" }}selected{{ end }}>timeout</option>
+        <option value="cancelled" {{ if eq .Filter.Status "cancelled" }}selected{{ end }}>cancelled</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="from">From</label>
+      <input id="from" name="from" value="{{ .Filter.From }}" placeholder="RFC3339">
+    </div>
+    <div class="field">
+      <label for="to">To</label>
+      <input id="to" name="to" value="{{ .Filter.To }}" placeholder="RFC3339">
+    </div>
+    <div class="actions" style="grid-column: 1 / -1;">
+      <button class="btn primary" type="submit">Search</button>
+      <a class="btn" href="/runs">Reset</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  {{ if .Runs }}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Job</th>
+        <th>Scheduled</th>
+        <th>Status</th>
+        <th>Attempt</th>
+        <th>Exit</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Runs }}
+      <tr>
+        <td><a href="/runs/{{ .ID }}">{{ .ID }}</a></td>
+        <td>
+          <div><a href="/jobs/{{ .JobID }}">{{ if .JobName }}{{ .JobName }}{{ else }}Job #{{ .JobID }}{{ end }}</a></div>
+          <div class="muted">Job #{{ .JobID }}</div>
+        </td>
+        <td>{{ formatTime .ScheduledAt }}</td>
+        <td><span class="{{ statusClass .Status }}">{{ .Status }}</span></td>
+        <td>{{ .Attempt }}</td>
+        <td>{{ formatValue .ExitCode }}</td>
+        <td><a class="btn" href="/runs/{{ .ID }}">View</a></td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <div class="empty">No runs found.</div>
+  {{ end }}
+</section>
+
+<section class="card">
+  <div class="actions" style="justify-content: space-between;">
+    <div class="muted">Total {{ .Pagination.Total }} runs</div>
+    <div class="actions">
+      {{ if .Pagination.HasPrev }}<a class="btn" href="/runs?page={{ .Pagination.PrevPage }}&size={{ .Pagination.Size }}">Prev</a>{{ end }}
+      <span class="btn" style="cursor: default;">Page {{ .Pagination.Page }}</span>
+      {{ if .Pagination.HasNext }}<a class="btn" href="/runs?page={{ .Pagination.NextPage }}&size={{ .Pagination.Size }}">Next</a>{{ end }}
+    </div>
+  </div>
+</section>
+{{ end }}

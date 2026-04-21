@@ -1,0 +1,94 @@
+{{ define "jobs_list_content" }}
+<section class="card">
+  <form method="get" action="/jobs" class="grid three">
+    <div class="field">
+      <label for="name">Name</label>
+      <input id="name" name="name" value="{{ .Filter.Name }}" placeholder="Search by job name">
+    </div>
+    <div class="field">
+      <label for="enabled">Enabled</label>
+      <select id="enabled" name="enabled">
+        <option value="" {{ if eq .Filter.Enabled "" }}selected{{ end }}>All</option>
+        <option value="true" {{ if eq .Filter.Enabled "true" }}selected{{ end }}>Enabled</option>
+        <option value="false" {{ if eq .Filter.Enabled "false" }}selected{{ end }}>Disabled</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="scheduleType">Schedule Type</label>
+      <select id="scheduleType" name="scheduleType">
+        <option value="" {{ if eq .Filter.ScheduleType "" }}selected{{ end }}>All</option>
+        <option value="cron" {{ if eq .Filter.ScheduleType "cron" }}selected{{ end }}>cron</option>
+        <option value="interval" {{ if eq .Filter.ScheduleType "interval" }}selected{{ end }}>interval</option>
+      </select>
+    </div>
+    <div class="actions" style="grid-column: 1 / -1;">
+      <button class="btn primary" type="submit">Search</button>
+      <a class="btn" href="/jobs">Reset</a>
+      <a class="btn primary" href="/jobs/new">New Job</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  {{ if .Jobs }}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Enabled</th>
+        <th>Schedule</th>
+        <th>Next Run</th>
+        <th>Last Scheduled</th>
+        <th>Policy</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Jobs }}
+      <tr>
+        <td>{{ .ID }}</td>
+        <td>
+          <div><a href="/jobs/{{ .ID }}">{{ .Name }}</a></div>
+          <div class="muted">{{ formatValue .Description }}</div>
+        </td>
+        <td>{{ if .Enabled }}Yes{{ else }}No{{ end }}</td>
+        <td>
+          <div>{{ scheduleLabel .ScheduleType }}</div>
+          <div class="muted">
+            {{ if eq .ScheduleType "cron" }}
+              {{ formatValue .ScheduleExpr }}
+            {{ else }}
+              every {{ formatValue .IntervalSec }}s
+            {{ end }}
+          </div>
+        </td>
+        <td>{{ formatTime .NextRunAt }}</td>
+        <td>{{ formatTime .LastScheduledAt }}</td>
+        <td>{{ .ConcurrencyPolicy }}</td>
+        <td>
+          <div class="actions">
+            <a class="btn" href="/jobs/{{ .ID }}">View</a>
+            <a class="btn" href="/jobs/{{ .ID }}/edit">Edit</a>
+          </div>
+        </td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <div class="empty">No jobs found.</div>
+  {{ end }}
+</section>
+
+<section class="card">
+  <div class="actions" style="justify-content: space-between;">
+    <div class="muted">Total {{ .Pagination.Total }} jobs</div>
+    <div class="actions">
+      {{ if .Pagination.HasPrev }}<a class="btn" href="/jobs?page={{ .Pagination.PrevPage }}&size={{ .Pagination.Size }}">Prev</a>{{ end }}
+      <span class="btn" style="cursor: default;">Page {{ .Pagination.Page }}</span>
+      {{ if .Pagination.HasNext }}<a class="btn" href="/jobs?page={{ .Pagination.NextPage }}&size={{ .Pagination.Size }}">Next</a>{{ end }}
+    </div>
+  </div>
+</section>
+{{ end }}
