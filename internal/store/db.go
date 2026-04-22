@@ -73,11 +73,21 @@ func (s *Store) Close() error {
 	return s.DB.Close()
 }
 
-func (s *Store) WithinTx(ctx context.Context, fn func(*TxStore) error) error {
+func (s *Store) WithinTx(ctx context.Context, fn func(*TxStore) error) (err error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
 
 	txStore := &TxStore{
 		Tx:     tx,
@@ -86,11 +96,12 @@ func (s *Store) WithinTx(ctx context.Context, fn func(*TxStore) error) error {
 		Events: NewEventRepo(tx),
 	}
 
-	if err := fn(txStore); err != nil {
-		_ = tx.Rollback()
+	err = fn(txStore)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	err = tx.Commit()
+	return err
 }
 
 func initialize(db *sql.DB) error {
