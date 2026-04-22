@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -552,9 +553,22 @@ func (u *UI) cancelRun(c *gin.Context) {
 }
 
 func (u *UI) render(c *gin.Context, status int, name string, data any) error {
+	contentTemplate, ok := pageContentTemplateName(data)
+	if !ok {
+		return fmt.Errorf("missing content template name")
+	}
+
+	tpl, err := u.tpl.Clone()
+	if err != nil {
+		return err
+	}
+	if _, err := tpl.Parse(fmt.Sprintf(`{{ define "page_content" }}{{ template %q . }}{{ end }}`, contentTemplate)); err != nil {
+		return err
+	}
+
 	c.Status(status)
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	return u.tpl.ExecuteTemplate(c.Writer, name, data)
+	return tpl.ExecuteTemplate(c.Writer, name, data)
 }
 
 func (u *UI) renderOrError(c *gin.Context, status int, name string, data any) {
@@ -817,4 +831,25 @@ func (u *UI) buildImagePanel(c *gin.Context, job *model.Job) *jobImagePanel {
 	}
 
 	return panel
+}
+
+func pageContentTemplateName(data any) (string, bool) {
+	if data == nil {
+		return "", false
+	}
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "", false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return "", false
+	}
+	field := v.FieldByName("ContentTemplate")
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return "", false
+	}
+	return field.String(), true
 }
