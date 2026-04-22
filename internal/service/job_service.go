@@ -101,7 +101,15 @@ func (s *JobService) UpdateJob(ctx context.Context, id int64, input JobInput) (*
 	if err != nil {
 		return nil, err
 	}
+
+	existing, err := s.store.Jobs.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
 	job.ID = id
+	job.CreatedAt = existing.CreatedAt
+	job.LastScheduledAt = existing.LastScheduledAt
 
 	now := s.now().UTC()
 	job.UpdatedAt = now
