@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hoonzinope/go-job-runner/internal/image"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
 	"github.com/hoonzinope/go-job-runner/internal/service"
@@ -25,6 +27,7 @@ var templatesFS embed.FS
 type UI struct {
 	jobs   *service.JobService
 	runs   *service.RunService
+	images *image.Resolver
 	reader *logwriter.Reader
 	tpl    *template.Template
 }
@@ -62,9 +65,21 @@ type jobListFilter struct {
 
 type jobFormPage struct {
 	pageMeta
-	Mode  string
-	Job   *model.Job
-	Error string
+	Mode        string
+	Job         *model.Job
+	Image       *jobImagePanel
+	FieldErrors map[string]string
+	Error       string
+}
+
+type jobImagePanel struct {
+	SourceType string
+	Query      string
+	Prefix     string
+	ImageRef   string
+	Candidates []image.Candidate
+	Resolved   *image.Candidate
+	Error      string
 }
 
 type jobDetailPage struct {
@@ -104,7 +119,7 @@ type runDetailPage struct {
 	CanCancel     bool
 }
 
-func New(jobs *service.JobService, runs *service.RunService, reader *logwriter.Reader) *UI {
+func New(jobs *service.JobService, runs *service.RunService, resolver *image.Resolver, reader *logwriter.Reader) *UI {
 	if reader == nil {
 		reader = logwriter.NewReader()
 	}
@@ -181,11 +196,18 @@ func New(jobs *service.JobService, runs *service.RunService, reader *logwriter.R
 			}
 			return out.String()
 		},
+		"fieldError": func(fields map[string]string, name string) string {
+			if fields == nil {
+				return ""
+			}
+			return fields[name]
+		},
 	}).ParseFS(templatesFS, "templates/*.tmpl"))
 
 	return &UI{
 		jobs:   jobs,
 		runs:   runs,
+		images: resolver,
 		reader: reader,
 		tpl:    tpl,
 	}
@@ -197,10 +219,15 @@ func (u *UI) RegisterRoutes(r gin.IRoutes) {
 	})
 	r.GET("/jobs", u.listJobs)
 	r.GET("/jobs/new", u.newJob)
+	r.POST("/jobs", u.createJob)
 	r.GET("/jobs/:jobId", u.jobDetail)
 	r.GET("/jobs/:jobId/edit", u.editJob)
+	r.POST("/jobs/:jobId", u.updateJob)
+	r.POST("/jobs/:jobId/delete", u.deleteJob)
+	r.POST("/jobs/:jobId/trigger", u.triggerJob)
 	r.GET("/runs", u.listRuns)
 	r.GET("/runs/:runId", u.runDetail)
+	r.POST("/runs/:runId/cancel", u.cancelRun)
 }
 
 func (u *UI) listJobs(c *gin.Context) {
@@ -244,10 +271,17 @@ func (u *UI) listJobs(c *gin.Context) {
 
 func (u *UI) newJob(c *gin.Context) {
 	job := &model.Job{
-		Enabled:      true,
-		SourceType:   model.JobSourceTypeLocal,
-		ScheduleType: model.ScheduleTypeInterval,
-		Timezone:     "UTC",
+		Enabled:           true,
+		SourceType:        model.JobSourceTypeLocal,
+		ScheduleType:      model.ScheduleTypeInterval,
+		ConcurrencyPolicy: model.ConcurrencyPolicyForbid,
+		Timezone:          "UTC",
+	}
+	if imageRef := strings.TrimSpace(c.Query("imageRef")); imageRef != "" {
+		job.ImageRef = imageRef
+	}
+	if sourceType := strings.TrimSpace(c.Query("sourceType")); sourceType != "" {
+		job.SourceType = model.JobSourceType(sourceType)
 	}
 	u.renderOrError(c, http.StatusOK, "base", jobFormPage{
 		pageMeta: pageMeta{
@@ -256,8 +290,9 @@ func (u *UI) newJob(c *gin.Context) {
 			ActiveNav:       "jobs",
 			ContentTemplate: "job_form_content",
 		},
-		Mode: "create",
-		Job:  job,
+		Mode:  "create",
+		Job:   job,
+		Image: u.buildImagePanel(c, job),
 	})
 }
 
@@ -272,6 +307,12 @@ func (u *UI) editJob(c *gin.Context) {
 		u.renderError(c, http.StatusNotFound, "Job edit", err)
 		return
 	}
+	if imageRef := strings.TrimSpace(c.Query("imageRef")); imageRef != "" {
+		job.ImageRef = imageRef
+	}
+	if sourceType := strings.TrimSpace(c.Query("sourceType")); sourceType != "" {
+		job.SourceType = model.JobSourceType(sourceType)
+	}
 	u.renderOrError(c, http.StatusOK, "base", jobFormPage{
 		pageMeta: pageMeta{
 			Title:           fmt.Sprintf("Edit Job #%d", job.ID),
@@ -279,9 +320,78 @@ func (u *UI) editJob(c *gin.Context) {
 			ActiveNav:       "jobs",
 			ContentTemplate: "job_form_content",
 		},
-		Mode: "edit",
-		Job:  job,
+		Mode:  "edit",
+		Job:   job,
+		Image: u.buildImagePanel(c, job),
 	})
+}
+
+func (u *UI) createJob(c *gin.Context) {
+	input, draft, err := jobInputFromForm(c)
+	if err != nil {
+		u.renderJobForm(c, http.StatusBadRequest, "New Job", "Create a new scheduled task", "create", draft, u.buildImagePanel(c, draft), jobValidationFields(err), err)
+		return
+	}
+
+	job, err := u.jobs.CreateJob(c.Request.Context(), input)
+	if err != nil {
+		u.renderJobForm(c, http.StatusBadRequest, "New Job", "Create a new scheduled task", "create", draft, u.buildImagePanel(c, draft), jobValidationFields(err), err)
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, fmt.Sprintf("/jobs/%d", job.ID))
+}
+
+func (u *UI) updateJob(c *gin.Context) {
+	jobID, err := parseID(c.Param("jobId"))
+	if err != nil {
+		u.renderError(c, http.StatusBadRequest, "Job edit", err)
+		return
+	}
+	input, draft, err := jobInputFromForm(c)
+	if err != nil {
+		u.renderJobForm(c, http.StatusBadRequest, fmt.Sprintf("Edit Job #%d", jobID), "Update the job configuration", "edit", draft, u.buildImagePanel(c, draft), jobValidationFields(err), err)
+		return
+	}
+
+	job, err := u.jobs.UpdateJob(c.Request.Context(), jobID, input)
+	if err != nil {
+		u.renderJobForm(c, http.StatusBadRequest, fmt.Sprintf("Edit Job #%d", jobID), "Update the job configuration", "edit", draft, u.buildImagePanel(c, draft), jobValidationFields(err), err)
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, fmt.Sprintf("/jobs/%d", job.ID))
+}
+
+func (u *UI) deleteJob(c *gin.Context) {
+	jobID, err := parseID(c.Param("jobId"))
+	if err != nil {
+		u.renderError(c, http.StatusBadRequest, "Job delete", err)
+		return
+	}
+	if err := u.jobs.DeleteJob(c.Request.Context(), jobID); err != nil {
+		u.renderError(c, http.StatusInternalServerError, "Job delete", err)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/jobs")
+}
+
+func (u *UI) triggerJob(c *gin.Context) {
+	jobID, err := parseID(c.Param("jobId"))
+	if err != nil {
+		u.renderError(c, http.StatusBadRequest, "Job trigger", err)
+		return
+	}
+	var reason *string
+	if v := strings.TrimSpace(c.PostForm("reason")); v != "" {
+		reason = &v
+	}
+	run, err := u.jobs.TriggerJob(c.Request.Context(), jobID, reason)
+	if err != nil {
+		u.renderError(c, http.StatusInternalServerError, "Job trigger", err)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, fmt.Sprintf("/runs/%d", run.ID))
 }
 
 func (u *UI) jobDetail(c *gin.Context) {
@@ -419,6 +529,20 @@ func (u *UI) runDetail(c *gin.Context) {
 	})
 }
 
+func (u *UI) cancelRun(c *gin.Context) {
+	runID, err := parseID(c.Param("runId"))
+	if err != nil {
+		u.renderError(c, http.StatusBadRequest, "Run cancel", err)
+		return
+	}
+	run, err := u.runs.CancelRun(c.Request.Context(), runID)
+	if err != nil {
+		u.renderError(c, http.StatusInternalServerError, "Run cancel", err)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, fmt.Sprintf("/runs/%d", run.ID))
+}
+
 func (u *UI) render(c *gin.Context, status int, name string, data any) error {
 	c.Status(status)
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -517,4 +641,172 @@ func jsonFromFile(path string) (string, error) {
 		return string(raw), nil
 	}
 	return out.String(), nil
+}
+
+func newJobDraft() *model.Job {
+	return &model.Job{
+		Enabled:           true,
+		SourceType:        model.JobSourceTypeLocal,
+		ScheduleType:      model.ScheduleTypeInterval,
+		ConcurrencyPolicy: model.ConcurrencyPolicyForbid,
+		Timezone:          "UTC",
+	}
+}
+
+func jobInputFromForm(c *gin.Context) (service.JobInput, *model.Job, error) {
+	params := strings.TrimSpace(c.PostForm("params"))
+	var paramsJSON *string
+	if params != "" {
+		paramsJSON = &params
+	}
+
+	draft := newJobDraft()
+	var (
+		enabled, _ = parseBoolQuery(c.PostForm("enabled"))
+		jobInput   = service.JobInput{
+			Name:              strings.TrimSpace(c.PostForm("name")),
+			ConcurrencyPolicy: model.ConcurrencyPolicy(strings.TrimSpace(c.PostForm("concurrencyPolicy"))),
+			Timezone:          strings.TrimSpace(c.PostForm("timezone")),
+			SourceType:        model.JobSourceType(strings.TrimSpace(c.PostForm("sourceType"))),
+			ImageRef:          strings.TrimSpace(c.PostForm("imageRef")),
+			ScheduleType:      model.ScheduleType(strings.TrimSpace(c.PostForm("scheduleType"))),
+			RetryLimit:        parseIntFormDefault(c.PostForm("retryLimit"), 0),
+			TimeoutSec:        parseIntFormDefault(c.PostForm("timeoutSec"), 0),
+			Description:       stringPtrOrNil(strings.TrimSpace(c.PostForm("description"))),
+			Enabled:           enabled != nil && *enabled,
+			ParamsJSON:        paramsJSON,
+		}
+	)
+	draft.Name = jobInput.Name
+	draft.Description = jobInput.Description
+	draft.Enabled = jobInput.Enabled
+	draft.SourceType = jobInput.SourceType
+	draft.ImageRef = jobInput.ImageRef
+	draft.ImageDigest = jobInput.ImageDigest
+	draft.ScheduleType = jobInput.ScheduleType
+	draft.ScheduleExpr = jobInput.ScheduleExpr
+	draft.IntervalSec = jobInput.IntervalSec
+	draft.Timezone = jobInput.Timezone
+	draft.ConcurrencyPolicy = jobInput.ConcurrencyPolicy
+	draft.RetryLimit = jobInput.RetryLimit
+	draft.TimeoutSec = jobInput.TimeoutSec
+	draft.ParamsJSON = paramsJSON
+
+	if interval := strings.TrimSpace(c.PostForm("intervalSec")); interval != "" {
+		n, err := strconv.Atoi(interval)
+		if err != nil {
+			return jobInput, draft, &service.ValidationError{Field: "intervalSec", Message: "must be a number"}
+		}
+		jobInput.IntervalSec = &n
+		draft.IntervalSec = &n
+	}
+	if expr := strings.TrimSpace(c.PostForm("scheduleExpr")); expr != "" {
+		jobInput.ScheduleExpr = &expr
+		draft.ScheduleExpr = &expr
+	}
+	if imgDigest := strings.TrimSpace(c.PostForm("imageDigest")); imgDigest != "" {
+		jobInput.ImageDigest = &imgDigest
+		draft.ImageDigest = &imgDigest
+	}
+	return jobInput, draft, nil
+}
+
+func parseIntFormDefault(value string, fallback int) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func stringPtrOrNil(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
+}
+
+func (u *UI) renderJobForm(c *gin.Context, status int, title, subtitle, mode string, job *model.Job, imagePanel *jobImagePanel, fieldErrors map[string]string, err error) {
+	u.renderOrError(c, status, "base", jobFormPage{
+		pageMeta: pageMeta{
+			Title:           title,
+			Subtitle:        subtitle,
+			ActiveNav:       "jobs",
+			ContentTemplate: "job_form_content",
+		},
+		Mode:        mode,
+		Job:         job,
+		Image:       imagePanel,
+		FieldErrors: fieldErrors,
+		Error:       err.Error(),
+	})
+}
+
+func jobValidationFields(err error) map[string]string {
+	if err == nil {
+		return nil
+	}
+	var vErr *service.ValidationError
+	if errors.As(err, &vErr) && vErr != nil {
+		if vErr.Field != "" {
+			return map[string]string{vErr.Field: vErr.Message}
+		}
+	}
+	return nil
+}
+
+func (u *UI) buildImagePanel(c *gin.Context, job *model.Job) *jobImagePanel {
+	if u.images == nil {
+		return nil
+	}
+
+	sourceType := strings.TrimSpace(c.Query("sourceType"))
+	if sourceType == "" && job != nil {
+		sourceType = string(job.SourceType)
+	}
+	if sourceType == "" {
+		sourceType = u.images.DefaultSource()
+	}
+
+	query := strings.TrimSpace(c.Query("q"))
+	prefix := strings.TrimSpace(c.Query("prefix"))
+	imageRef := strings.TrimSpace(c.Query("imageRef"))
+	if imageRef == "" && job != nil {
+		imageRef = strings.TrimSpace(job.ImageRef)
+	}
+
+	panel := &jobImagePanel{
+		SourceType: sourceType,
+		Query:      query,
+		Prefix:     prefix,
+		ImageRef:   imageRef,
+	}
+
+	if candidates, err := u.images.ListCandidates(c.Request.Context(), sourceType, query, prefix); err != nil {
+		panel.Error = err.Error()
+	} else {
+		if len(candidates) > 20 {
+			candidates = candidates[:20]
+		}
+		panel.Candidates = candidates
+	}
+
+	if imageRef != "" {
+		resolved, err := u.images.Resolve(c.Request.Context(), sourceType, imageRef)
+		if err != nil {
+			if panel.Error == "" {
+				panel.Error = err.Error()
+			} else {
+				panel.Error = panel.Error + "; " + err.Error()
+			}
+		} else {
+			panel.Resolved = resolved
+		}
+	}
+
+	return panel
 }

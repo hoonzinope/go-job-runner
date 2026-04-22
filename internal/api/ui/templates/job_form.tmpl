@@ -1,5 +1,5 @@
 {{ define "job_form_content" }}
-<form class="grid" method="post">
+<form class="grid" method="post" action="{{ if eq .Mode "edit" }}/jobs/{{ .Job.ID }}{{ else }}/jobs{{ end }}">
   <section class="card">
     <div class="actions" style="justify-content: space-between; align-items: center;">
       <div>
@@ -14,12 +14,19 @@
     </div>
   </section>
 
+  {{ if .Error }}
+  <section class="card">
+    <div class="empty" style="border-color: rgba(180,35,24,0.3); color: var(--danger);">{{ .Error }}</div>
+  </section>
+  {{ end }}
+
   <section class="card">
     <h2 class="section-title">Job Definition</h2>
     <div class="grid two">
       <div class="field">
         <label for="name">Name</label>
         <input id="name" name="name" value="{{ .Job.Name }}" placeholder="task-name">
+        {{ with fieldError .FieldErrors "name" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="enabled">Enabled</label>
@@ -27,6 +34,7 @@
           <option value="true" {{ if .Job.Enabled }}selected{{ end }}>Enabled</option>
           <option value="false" {{ if not .Job.Enabled }}selected{{ end }}>Disabled</option>
         </select>
+        {{ with fieldError .FieldErrors "enabled" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="sourceType">Source Type</label>
@@ -34,10 +42,12 @@
           <option value="local" {{ if eq .Job.SourceType "local" }}selected{{ end }}>local</option>
           <option value="remote" {{ if eq .Job.SourceType "remote" }}selected{{ end }}>remote</option>
         </select>
+        {{ with fieldError .FieldErrors "sourceType" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="imageRef">Image Ref</label>
         <input id="imageRef" name="imageRef" value="{{ .Job.ImageRef }}" placeholder="jobs/example:latest">
+        {{ with fieldError .FieldErrors "imageRef" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="scheduleType">Schedule Type</label>
@@ -45,18 +55,22 @@
           <option value="cron" {{ if eq .Job.ScheduleType "cron" }}selected{{ end }}>cron</option>
           <option value="interval" {{ if eq .Job.ScheduleType "interval" }}selected{{ end }}>interval</option>
         </select>
+        {{ with fieldError .FieldErrors "scheduleType" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="timezone">Timezone</label>
         <input id="timezone" name="timezone" value="{{ .Job.Timezone }}" placeholder="UTC">
+        {{ with fieldError .FieldErrors "timezone" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="scheduleExpr">Cron Expression</label>
         <input id="scheduleExpr" name="scheduleExpr" value="{{ inputString .Job.ScheduleExpr }}" placeholder="*/5 * * * *">
+        {{ with fieldError .FieldErrors "scheduleExpr" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="intervalSec">Interval Seconds</label>
         <input id="intervalSec" name="intervalSec" value="{{ inputInt .Job.IntervalSec }}" placeholder="60">
+        {{ with fieldError .FieldErrors "intervalSec" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="concurrencyPolicy">Concurrency Policy</label>
@@ -64,14 +78,17 @@
           <option value="forbid" {{ if eq .Job.ConcurrencyPolicy "forbid" }}selected{{ end }}>forbid</option>
           <option value="allow" {{ if eq .Job.ConcurrencyPolicy "allow" }}selected{{ end }}>allow</option>
         </select>
+        {{ with fieldError .FieldErrors "concurrencyPolicy" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="retryLimit">Retry Limit</label>
         <input id="retryLimit" name="retryLimit" value="{{ .Job.RetryLimit }}" type="number" min="0">
+        {{ with fieldError .FieldErrors "retryLimit" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field">
         <label for="timeoutSec">Timeout Sec</label>
         <input id="timeoutSec" name="timeoutSec" value="{{ .Job.TimeoutSec }}" type="number" min="0">
+        {{ with fieldError .FieldErrors "timeoutSec" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
       <div class="field" style="grid-column: 1 / -1;">
         <label for="description">Description</label>
@@ -83,11 +100,93 @@
       </div>
     </div>
   </section>
-
-  <section class="card">
-    <h2 class="section-title">Image Panel</h2>
-    <p class="muted">This area will later show local/remote candidates and resolve results for the selected image ref.</p>
-    <div class="empty">Image candidate lookup and resolve preview are wired in the API, but the form interaction is still a stub.</div>
-  </section>
 </form>
+
+<section class="card">
+  <div class="actions" style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <div>
+      <h2 class="section-title" style="margin: 0;">Image Panel</h2>
+      <p class="muted" style="margin: 4px 0 0;">Preview candidates and resolve the current image ref.</p>
+    </div>
+    <form method="get" action="{{ if eq .Mode "edit" }}/jobs/{{ .Job.ID }}/edit{{ else }}/jobs/new{{ end }}" class="actions">
+      <div class="field" style="min-width: 140px;">
+        <label for="panelSourceType">Source</label>
+        <select id="panelSourceType" name="sourceType">
+          <option value="local" {{ if and .Image (eq .Image.SourceType "local") }}selected{{ end }}>local</option>
+          <option value="remote" {{ if and .Image (eq .Image.SourceType "remote") }}selected{{ end }}>remote</option>
+        </select>
+      </div>
+      <div class="field" style="min-width: 180px;">
+        <label for="panelQuery">Search</label>
+        <input id="panelQuery" name="q" value="{{ if .Image }}{{ .Image.Query }}{{ end }}" placeholder="keyword">
+      </div>
+      <div class="field" style="min-width: 180px;">
+        <label for="panelPrefix">Prefix</label>
+        <input id="panelPrefix" name="prefix" value="{{ if .Image }}{{ .Image.Prefix }}{{ end }}" placeholder="jobs/">
+      </div>
+      <div class="field" style="min-width: 220px;">
+        <label for="panelImageRef">Image Ref</label>
+        <input id="panelImageRef" name="imageRef" value="{{ if .Image }}{{ .Image.ImageRef }}{{ end }}" placeholder="jobs/example:latest">
+      </div>
+      <div class="actions" style="align-self: end;">
+        <button class="btn primary" type="submit">Preview</button>
+      </div>
+    </form>
+  </div>
+
+  {{ if and .Image .Image.Error }}
+  <div class="empty" style="border-color: rgba(180,35,24,0.3); color: var(--danger); margin-bottom: 16px;">{{ .Image.Error }}</div>
+  {{ end }}
+
+  <div class="grid two">
+    <div>
+      <h3 class="section-title">Resolved</h3>
+      {{ if and .Image .Image.Resolved }}
+      <div class="meta-list">
+        <div class="meta-row"><div class="meta-key">Source Type</div><div class="meta-value">{{ .Image.Resolved.SourceType }}</div></div>
+        <div class="meta-row"><div class="meta-key">Image Ref</div><div class="meta-value">{{ .Image.Resolved.ImageRef }}</div></div>
+        <div class="meta-row"><div class="meta-key">Pull Ref</div><div class="meta-value">{{ formatValue .Image.Resolved.PullRef }}</div></div>
+        <div class="meta-row"><div class="meta-key">Digest</div><div class="meta-value">{{ formatValue .Image.Resolved.Digest }}</div></div>
+      </div>
+      {{ else }}
+      <div class="empty">No resolved image preview.</div>
+      {{ end }}
+    </div>
+    <div>
+      <h3 class="section-title">Candidates</h3>
+      {{ if and .Image .Image.Candidates }}
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Ref</th>
+            <th>Digest</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Image.Candidates }}
+          <tr>
+            <td>{{ .SourceType }}</td>
+            <td>{{ .ImageRef }}</td>
+            <td>{{ formatValue .Digest }}</td>
+            <td>
+              <form method="get" action="{{ if eq $.Mode "edit" }}/jobs/{{ $.Job.ID }}/edit{{ else }}/jobs/new{{ end }}" class="actions">
+                <input type="hidden" name="sourceType" value="{{ .SourceType }}">
+                <input type="hidden" name="q" value="{{ if $.Image }}{{ $.Image.Query }}{{ end }}">
+                <input type="hidden" name="prefix" value="{{ if $.Image }}{{ $.Image.Prefix }}{{ end }}">
+                <input type="hidden" name="imageRef" value="{{ .ImageRef }}">
+                <button class="btn" type="submit">Use</button>
+              </form>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      {{ else }}
+      <div class="empty">No image candidates.</div>
+      {{ end }}
+    </div>
+  </div>
+</section>
 {{ end }}

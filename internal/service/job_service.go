@@ -33,6 +33,24 @@ type JobInput struct {
 	Timezone          string
 }
 
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Field == "" {
+		return e.Message
+	}
+	if e.Message == "" {
+		return e.Field
+	}
+	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
 type JobService struct {
 	store     *store.Store
 	scheduler SchedulerNotifier
@@ -152,19 +170,19 @@ func (s *JobService) ListJobRuns(ctx context.Context, jobID int64, status *model
 
 func (s *JobService) buildJob(input JobInput) (*model.Job, error) {
 	if input.Name == "" {
-		return nil, fmt.Errorf("name is required")
+		return nil, &ValidationError{Field: "name", Message: "is required"}
 	}
 	if !input.SourceType.IsValid() {
-		return nil, fmt.Errorf("invalid sourceType: %q", input.SourceType)
+		return nil, &ValidationError{Field: "sourceType", Message: fmt.Sprintf("invalid value %q", input.SourceType)}
 	}
 	if input.ImageRef == "" {
-		return nil, fmt.Errorf("imageRef is required")
+		return nil, &ValidationError{Field: "imageRef", Message: "is required"}
 	}
 	if !input.ScheduleType.IsValid() {
-		return nil, fmt.Errorf("invalid scheduleType: %q", input.ScheduleType)
+		return nil, &ValidationError{Field: "scheduleType", Message: fmt.Sprintf("invalid value %q", input.ScheduleType)}
 	}
 	if !input.ConcurrencyPolicy.IsValid() {
-		return nil, fmt.Errorf("invalid concurrencyPolicy: %q", input.ConcurrencyPolicy)
+		return nil, &ValidationError{Field: "concurrencyPolicy", Message: fmt.Sprintf("invalid value %q", input.ConcurrencyPolicy)}
 	}
 	if input.Timezone == "" {
 		input.Timezone = "UTC"
@@ -172,17 +190,17 @@ func (s *JobService) buildJob(input JobInput) (*model.Job, error) {
 	switch input.ScheduleType {
 	case model.ScheduleTypeInterval:
 		if input.IntervalSec == nil || *input.IntervalSec <= 0 {
-			return nil, fmt.Errorf("intervalSec must be > 0 for interval jobs")
+			return nil, &ValidationError{Field: "intervalSec", Message: "must be greater than 0 for interval jobs"}
 		}
 		if input.ScheduleExpr != nil && *input.ScheduleExpr != "" {
-			return nil, fmt.Errorf("scheduleExpr must be empty for interval jobs")
+			return nil, &ValidationError{Field: "scheduleExpr", Message: "must be empty for interval jobs"}
 		}
 	case model.ScheduleTypeCron:
 		if input.ScheduleExpr == nil || *input.ScheduleExpr == "" {
-			return nil, fmt.Errorf("scheduleExpr is required for cron jobs")
+			return nil, &ValidationError{Field: "scheduleExpr", Message: "is required for cron jobs"}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported schedule type: %q", input.ScheduleType)
+		return nil, &ValidationError{Field: "scheduleType", Message: fmt.Sprintf("unsupported value %q", input.ScheduleType)}
 	}
 
 	job := &model.Job{

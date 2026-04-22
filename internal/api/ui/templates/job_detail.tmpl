@@ -8,6 +8,13 @@
     <div class="actions">
       <a class="btn" href="/jobs">Back</a>
       <a class="btn" href="/jobs/{{ .Job.ID }}/edit">Edit</a>
+      <form method="post" action="/jobs/{{ .Job.ID }}/trigger" style="display:inline;">
+        <input type="hidden" name="reason" value="Triggered from UI">
+        <button class="btn primary" type="submit">Trigger</button>
+      </form>
+      <form method="post" action="/jobs/{{ .Job.ID }}/delete" style="display:inline;" onsubmit="return confirm('Delete this job?');">
+        <button class="btn danger" type="submit">Delete</button>
+      </form>
     </div>
   </div>
 </section>

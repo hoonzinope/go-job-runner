@@ -10,7 +10,11 @@
     </div>
     <div class="actions">
       <a class="btn" href="/runs">Back</a>
-      {{ if .CanCancel }}<a class="btn danger" href="/api/v1/runs/{{ .Run.ID }}/cancel">Cancel via API</a>{{ end }}
+      {{ if .CanCancel }}
+      <form method="post" action="/runs/{{ .Run.ID }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel this run?');">
+        <button class="btn danger" type="submit">Cancel</button>
+      </form>
+      {{ end }}
     </div>
   </div>
 </section>

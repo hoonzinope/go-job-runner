@@ -40,7 +40,7 @@ func (s *APIServer) setupRouter() *gin.Engine {
 	router.GET("/health", handler.HealthzHandler)
 	jobService := service.NewJobService(s.Store, s.Scheduler)
 	runService := service.NewRunService(s.Store)
-	ui := webui.New(jobService, runService, logwriter.NewReader())
+	ui := webui.New(jobService, runService, s.ImageResolver, logwriter.NewReader())
 	ui.RegisterRoutes(router)
 
 	api := router.Group("/api/v1")
