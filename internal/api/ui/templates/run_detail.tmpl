@@ -22,15 +22,15 @@
 <section class="card">
   <h2 class="section-title">Summary</h2>
   <div class="meta-list">
-    <div class="meta-row"><div class="meta-key">Status</div><div class="meta-value"><span class="{{ statusClass .Run.Status }}">{{ .Run.Status }}</span></div></div>
+    <div class="meta-row"><div class="meta-key">Status</div><div class="meta-value"><span id="run-status" class="{{ statusClass .Run.Status }}">{{ .Run.Status }}</span></div></div>
     <div class="meta-row"><div class="meta-key">Scheduled At</div><div class="meta-value">{{ formatTime .Run.ScheduledAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Started At</div><div class="meta-value">{{ formatTime .Run.StartedAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Finished At</div><div class="meta-value">{{ formatTime .Run.FinishedAt }}</div></div>
+    <div class="meta-row"><div class="meta-key">Started At</div><div id="run-started-at" class="meta-value">{{ formatTime .Run.StartedAt }}</div></div>
+    <div class="meta-row"><div class="meta-key">Finished At</div><div id="run-finished-at" class="meta-value">{{ formatTime .Run.FinishedAt }}</div></div>
     <div class="meta-row"><div class="meta-key">Attempt</div><div class="meta-value">{{ .Run.Attempt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Exit Code</div><div class="meta-value">{{ formatValue .Run.ExitCode }}</div></div>
-    <div class="meta-row"><div class="meta-key">Error Message</div><div class="meta-value">{{ formatValue .Run.ErrorMessage }}</div></div>
-    <div class="meta-row"><div class="meta-key">Log Path</div><div class="meta-value">{{ formatValue .Run.LogPath }}</div></div>
-    <div class="meta-row"><div class="meta-key">Result Path</div><div class="meta-value">{{ formatValue .Run.ResultPath }}</div></div>
+    <div class="meta-row"><div class="meta-key">Exit Code</div><div id="run-exit-code" class="meta-value">{{ formatValue .Run.ExitCode }}</div></div>
+    <div class="meta-row"><div class="meta-key">Error Message</div><div id="run-error-message" class="meta-value">{{ formatValue .Run.ErrorMessage }}</div></div>
+    <div class="meta-row"><div class="meta-key">Log Path</div><div id="run-log-path" class="meta-value">{{ formatValue .Run.LogPath }}</div></div>
+    <div class="meta-row"><div class="meta-key">Result Path</div><div id="run-result-path" class="meta-value">{{ formatValue .Run.ResultPath }}</div></div>
   </div>
 </section>
 
@@ -64,9 +64,11 @@
   <div class="card">
     <h2 class="section-title">Logs</h2>
     {{ if .LogContent }}
-    <pre class="code">{{ .LogContent }}</pre>
+    <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset {{ .LogOffset }}, size {{ .LogSize }}</div>
+    <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="{{ .LogOffset }}" data-log-size="{{ .LogSize }}">{{ .LogContent }}</pre>
     {{ else }}
-    <div class="empty">No log content available.</div>
+    <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset 0, size 0</div>
+    <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="0" data-log-size="0"></pre>
     {{ end }}
   </div>
   <div class="card">
@@ -78,4 +80,108 @@
     {{ end }}
   </div>
 </section>
+
+<script>
+(function () {
+  var runId = {{ .Run.ID }};
+  var statusEl = document.getElementById('run-status');
+  var startedAtEl = document.getElementById('run-started-at');
+  var finishedAtEl = document.getElementById('run-finished-at');
+  var exitCodeEl = document.getElementById('run-exit-code');
+  var errorMessageEl = document.getElementById('run-error-message');
+  var logPathEl = document.getElementById('run-log-path');
+  var resultPathEl = document.getElementById('run-result-path');
+  var logEl = document.getElementById('run-log-content');
+  var logMetaEl = document.getElementById('run-log-meta');
+  if (!statusEl || !logEl) return;
+
+  var offset = Number(logEl.dataset.logOffset || '0');
+  var size = Number(logEl.dataset.logSize || '0');
+  var currentStatus = (logEl.dataset.runStatus || statusEl.textContent || '').trim();
+  var terminal = { success: true, failed: true, timeout: true, cancelled: true };
+  var pollMs = 2000;
+
+  function formatValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return String(value);
+  }
+
+  function formatTime(value) {
+    return formatValue(value);
+  }
+
+  function updateStatusBadge(value) {
+    statusEl.textContent = formatValue(value);
+    statusEl.className = 'status';
+    if (value === 'success') {
+      statusEl.classList.add('status-success');
+    } else if (value === 'failed' || value === 'timeout') {
+      statusEl.classList.add('status-failed');
+    } else if (value === 'running' || value === 'pending' || value === 'cancelling') {
+      statusEl.classList.add('status-warn');
+    } else if (value === 'cancelled') {
+      statusEl.classList.add('status-muted');
+    }
+  }
+
+  function updateMeta(run) {
+    if (run.startedAt !== undefined) startedAtEl.textContent = formatTime(run.startedAt);
+    if (run.finishedAt !== undefined) finishedAtEl.textContent = formatTime(run.finishedAt);
+    if (run.exitCode !== undefined) exitCodeEl.textContent = formatValue(run.exitCode);
+    if (run.errorMessage !== undefined) errorMessageEl.textContent = formatValue(run.errorMessage);
+    if (run.logPath !== undefined) logPathEl.textContent = formatValue(run.logPath);
+    if (run.resultPath !== undefined) resultPathEl.textContent = formatValue(run.resultPath);
+  }
+
+  async function refreshStatus() {
+    var response = await fetch('/api/v1/runs/' + runId, { headers: { 'Accept': 'application/json' } });
+    if (!response.ok) return null;
+    return await response.json();
+  }
+
+  async function refreshLogs() {
+    var response = await fetch('/api/v1/runs/' + runId + '/logs?offset=' + offset, { headers: { 'Accept': 'application/json' } });
+    if (!response.ok) return null;
+    return await response.json();
+  }
+
+  async function tick() {
+    try {
+      var run = await refreshStatus();
+      if (run) {
+        currentStatus = run.status || currentStatus;
+        updateStatusBadge(currentStatus);
+        updateMeta(run);
+      }
+
+      if (!terminal[currentStatus]) {
+        var log = await refreshLogs();
+        if (log) {
+          if (typeof log.content === 'string' && log.content.length > 0) {
+            logEl.textContent += log.content;
+            if (logMetaEl) {
+              logMetaEl.textContent = 'offset ' + log.offset + ', size ' + log.size;
+            }
+          }
+          if (typeof log.offset === 'number' && typeof log.size === 'number') {
+            offset = log.offset + log.size;
+            logEl.dataset.logOffset = String(log.offset);
+            logEl.dataset.logSize = String(log.size);
+          }
+        }
+      }
+    } catch (err) {
+      // Keep the page stable if the refresh request fails transiently.
+    }
+
+    if (!terminal[currentStatus]) {
+      window.setTimeout(tick, pollMs);
+    }
+  }
+
+  if (!terminal[currentStatus]) {
+    window.setTimeout(tick, pollMs);
+  }
+})();
+</script>
 {{ end }}

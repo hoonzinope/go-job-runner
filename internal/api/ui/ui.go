@@ -115,6 +115,8 @@ type runDetailPage struct {
 	Job           *model.Job
 	Events        []model.RunEvent
 	LogContent    string
+	LogOffset     int64
+	LogSize       int
 	ResultContent string
 	CanCancel     bool
 }
@@ -500,9 +502,13 @@ func (u *UI) runDetail(c *gin.Context) {
 	}
 
 	logContent := ""
+	var logOffset int64
+	var logSize int
 	if run.LogPath != nil && *run.LogPath != "" {
-		if content, _, _, err := u.reader.ReadContent(*run.LogPath, 0, 0, 8192); err == nil {
+		if content, offset, size, err := u.runs.ReadLogs(c.Request.Context(), runID, u.reader, 0, 0, 8192); err == nil {
 			logContent = content
+			logOffset = offset
+			logSize = size
 		}
 	}
 
@@ -524,6 +530,8 @@ func (u *UI) runDetail(c *gin.Context) {
 		Job:           job,
 		Events:        events,
 		LogContent:    logContent,
+		LogOffset:     logOffset,
+		LogSize:       logSize,
 		ResultContent: resultContent,
 		CanCancel:     run.Status == model.RunStatusPending || run.Status == model.RunStatusRunning || run.Status == model.RunStatusCancelling,
 	})
