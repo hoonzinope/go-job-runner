@@ -6,23 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/robfig/cron/v3"
 
 	"github.com/hoonzinope/go-job-runner/internal/model"
-	"github.com/hoonzinope/go-job-runner/internal/scheduler"
+	"github.com/hoonzinope/go-job-runner/internal/service"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type JobHandler struct {
-	store     *store.Store
-	scheduler *scheduler.Scheduler
+	service *service.JobService
 }
 
-func NewJobHandler(st *store.Store, sch *scheduler.Scheduler) *JobHandler {
-	return &JobHandler{store: st, scheduler: sch}
+func NewJobHandler(svc *service.JobService) *JobHandler {
+	return &JobHandler{service: svc}
 }
 
 func (h *JobHandler) ListJobs(c *gin.Context) {
@@ -41,7 +38,7 @@ func (h *JobHandler) ListJobs(c *gin.Context) {
 	}
 	filter.Name = c.Query("name")
 
-	jobs, total, err := h.store.Jobs.List(c.Request.Context(), filter, store.Page{Page: page, Size: size})
+	jobs, total, err := h.service.ListJobs(c.Request.Context(), filter, store.Page{Page: page, Size: size})
 	if err != nil {
 		internalError(c, err)
 		return
@@ -61,7 +58,7 @@ func (h *JobHandler) GetJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.store.Jobs.Get(c.Request.Context(), jobID)
+	job, err := h.service.GetJob(c.Request.Context(), jobID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			notFound(c, fmt.Errorf("job %d not found", jobID))
@@ -81,29 +78,19 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 		return
 	}
 
-	job, params, err := jobFromRequest(req)
+	input, err := jobInputFromRequest(req)
 	if err != nil {
 		badRequest(c, err)
 		return
 	}
-	job.ParamsJSON = params
 
-	nextRunAt, err := nextRunTime(job, time.Now().UTC())
+	created, err := h.service.CreateJob(c.Request.Context(), input)
 	if err != nil {
-		badRequest(c, err)
-		return
-	}
-	job.NextRunAt = nextRunAt
-
-	if _, err := h.store.Jobs.Create(c.Request.Context(), job); err != nil {
 		internalError(c, err)
 		return
 	}
-	if h.scheduler != nil {
-		h.scheduler.NotifyDueJob()
-	}
 
-	c.JSON(http.StatusCreated, toJobResponse(job))
+	c.JSON(http.StatusCreated, toJobResponse(created))
 }
 
 func (h *JobHandler) UpdateJob(c *gin.Context) {
@@ -119,30 +106,19 @@ func (h *JobHandler) UpdateJob(c *gin.Context) {
 		return
 	}
 
-	job, params, err := jobFromRequest(req)
+	input, err := jobInputFromRequest(req)
 	if err != nil {
 		badRequest(c, err)
 		return
 	}
-	job.ID = jobID
-	job.ParamsJSON = params
 
-	nextRunAt, err := nextRunTime(job, time.Now().UTC())
+	updated, err := h.service.UpdateJob(c.Request.Context(), jobID, input)
 	if err != nil {
-		badRequest(c, err)
-		return
-	}
-	job.NextRunAt = nextRunAt
-
-	if err := h.store.Jobs.Update(c.Request.Context(), job); err != nil {
 		internalError(c, err)
 		return
 	}
-	if h.scheduler != nil {
-		h.scheduler.NotifyDueJob()
-	}
 
-	c.JSON(http.StatusOK, toJobResponse(job))
+	c.JSON(http.StatusOK, toJobResponse(updated))
 }
 
 func (h *JobHandler) DeleteJob(c *gin.Context) {
@@ -152,7 +128,7 @@ func (h *JobHandler) DeleteJob(c *gin.Context) {
 		return
 	}
 
-	if err := h.store.Jobs.Delete(c.Request.Context(), jobID); err != nil {
+	if err := h.service.DeleteJob(c.Request.Context(), jobID); err != nil {
 		internalError(c, err)
 		return
 	}
@@ -167,16 +143,6 @@ func (h *JobHandler) TriggerJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.store.Jobs.Get(c.Request.Context(), jobID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			notFound(c, fmt.Errorf("job %d not found", jobID))
-			return
-		}
-		internalError(c, err)
-		return
-	}
-
 	type triggerRequest struct {
 		Reason *string `json:"reason"`
 	}
@@ -188,35 +154,14 @@ func (h *JobHandler) TriggerJob(c *gin.Context) {
 		}
 	}
 
-	now := time.Now().UTC()
-	run := &model.Run{
-		JobID:       job.ID,
-		ScheduledAt: now,
-		Status:      model.RunStatusPending,
-		Attempt:     0,
-	}
-
-	if err := h.store.WithinTx(c.Request.Context(), func(tx *store.TxStore) error {
-		if _, err := tx.Runs.Create(c.Request.Context(), run); err != nil {
-			return err
+	run, err := h.service.TriggerJob(c.Request.Context(), jobID, req.Reason)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			notFound(c, fmt.Errorf("job %d not found", jobID))
+			return
 		}
-		event := &model.RunEvent{
-			RunID:     run.ID,
-			EventType: model.RunEventTypeCreated,
-		}
-		if req.Reason != nil && *req.Reason != "" {
-			event.Message = req.Reason
-		}
-		if _, err := tx.Events.Create(c.Request.Context(), event); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
 		internalError(c, err)
 		return
-	}
-	if h.scheduler != nil {
-		h.scheduler.NotifyDispatch()
 	}
 
 	c.JSON(http.StatusCreated, toRunResponse(run))
@@ -230,14 +175,13 @@ func (h *JobHandler) ListJobRuns(c *gin.Context) {
 	}
 
 	page, size := parsePageQuery(c)
-	var filter store.RunFilter
-	filter.JobID = &jobID
-	if status := c.Query("status"); status != "" {
-		v := model.RunStatus(status)
-		filter.Status = &v
+	var status *model.RunStatus
+	if statusValue := c.Query("status"); statusValue != "" {
+		v := model.RunStatus(statusValue)
+		status = &v
 	}
 
-	runs, total, err := h.store.Runs.List(c.Request.Context(), filter, store.Page{Page: page, Size: size})
+	runs, total, err := h.service.ListJobRuns(c.Request.Context(), jobID, status, store.Page{Page: page, Size: size})
 	if err != nil {
 		internalError(c, err)
 		return
@@ -248,95 +192,6 @@ func (h *JobHandler) ListJobRuns(c *gin.Context) {
 		items = append(items, toRunResponse(&runs[i]))
 	}
 	c.JSON(http.StatusOK, listResponse[runResponse]{Items: items, Total: total, Page: page, Size: size})
-}
-
-func jobFromRequest(req jobRequest) (*model.Job, *string, error) {
-	if req.Name == "" {
-		return nil, nil, fmt.Errorf("name is required")
-	}
-	if !req.SourceType.IsValid() {
-		return nil, nil, fmt.Errorf("invalid sourceType: %q", req.SourceType)
-	}
-	if req.ImageRef == "" {
-		return nil, nil, fmt.Errorf("imageRef is required")
-	}
-	if !req.ScheduleType.IsValid() {
-		return nil, nil, fmt.Errorf("invalid scheduleType: %q", req.ScheduleType)
-	}
-	if !req.ConcurrencyPolicy.IsValid() {
-		return nil, nil, fmt.Errorf("invalid concurrencyPolicy: %q", req.ConcurrencyPolicy)
-	}
-	if req.Timezone == "" {
-		req.Timezone = "UTC"
-	}
-	if req.ScheduleType == model.ScheduleTypeInterval {
-		if req.IntervalSec == nil || *req.IntervalSec <= 0 {
-			return nil, nil, fmt.Errorf("intervalSec must be > 0 for interval jobs")
-		}
-		if req.ScheduleExpr != nil && *req.ScheduleExpr != "" {
-			return nil, nil, fmt.Errorf("scheduleExpr must be empty for interval jobs")
-		}
-	}
-	if req.ScheduleType == model.ScheduleTypeCron {
-		if req.ScheduleExpr == nil || *req.ScheduleExpr == "" {
-			return nil, nil, fmt.Errorf("scheduleExpr is required for cron jobs")
-		}
-	}
-
-	job := &model.Job{
-		Name:              req.Name,
-		Description:       req.Description,
-		Enabled:           req.Enabled,
-		SourceType:        req.SourceType,
-		ImageRef:          req.ImageRef,
-		ImageDigest:       req.ImageDigest,
-		ScheduleType:      req.ScheduleType,
-		ScheduleExpr:      req.ScheduleExpr,
-		IntervalSec:       req.IntervalSec,
-		Timezone:          req.Timezone,
-		ConcurrencyPolicy: req.ConcurrencyPolicy,
-		RetryLimit:        req.RetryLimit,
-		TimeoutSec:        req.TimeoutSec,
-		CreatedAt:         time.Now().UTC(),
-		UpdatedAt:         time.Now().UTC(),
-	}
-
-	var params *string
-	if len(req.Params) > 0 {
-		raw := string(req.Params)
-		params = &raw
-	}
-	return job, params, nil
-}
-
-func nextRunTime(job *model.Job, from time.Time) (*time.Time, error) {
-	switch job.ScheduleType {
-	case model.ScheduleTypeInterval:
-		if job.IntervalSec == nil {
-			return nil, fmt.Errorf("intervalSec is required")
-		}
-		next := from.Add(time.Duration(*job.IntervalSec) * time.Second).UTC()
-		return &next, nil
-	case model.ScheduleTypeCron:
-		if job.ScheduleExpr == nil || *job.ScheduleExpr == "" {
-			return nil, fmt.Errorf("scheduleExpr is required")
-		}
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-		sched, err := parser.Parse(*job.ScheduleExpr)
-		if err != nil {
-			return nil, fmt.Errorf("parse cron expression: %w", err)
-		}
-		loc := time.UTC
-		if job.Timezone != "" {
-			if loaded, err := time.LoadLocation(job.Timezone); err == nil {
-				loc = loaded
-			}
-		}
-		next := sched.Next(from.In(loc)).UTC()
-		return &next, nil
-	default:
-		return nil, fmt.Errorf("unsupported schedule type: %q", job.ScheduleType)
-	}
 }
 
 func toJobResponse(job *model.Job) jobResponse {
@@ -368,4 +223,42 @@ func rawJSON(v *string) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(*v)
+}
+
+func jobInputFromRequest(req jobRequest) (service.JobInput, error) {
+	if len(req.Params) == 0 {
+		return service.JobInput{
+			Name:              req.Name,
+			Description:       req.Description,
+			Enabled:           req.Enabled,
+			SourceType:        req.SourceType,
+			ImageRef:          req.ImageRef,
+			ImageDigest:       req.ImageDigest,
+			ScheduleType:      req.ScheduleType,
+			ScheduleExpr:      req.ScheduleExpr,
+			IntervalSec:       req.IntervalSec,
+			ParamsJSON:        nil,
+			ConcurrencyPolicy: req.ConcurrencyPolicy,
+			RetryLimit:        req.RetryLimit,
+			TimeoutSec:        req.TimeoutSec,
+			Timezone:          req.Timezone,
+		}, nil
+	}
+	raw := string(req.Params)
+	return service.JobInput{
+		Name:              req.Name,
+		Description:       req.Description,
+		Enabled:           req.Enabled,
+		SourceType:        req.SourceType,
+		ImageRef:          req.ImageRef,
+		ImageDigest:       req.ImageDigest,
+		ScheduleType:      req.ScheduleType,
+		ScheduleExpr:      req.ScheduleExpr,
+		IntervalSec:       req.IntervalSec,
+		ParamsJSON:        &raw,
+		ConcurrencyPolicy: req.ConcurrencyPolicy,
+		RetryLimit:        req.RetryLimit,
+		TimeoutSec:        req.TimeoutSec,
+		Timezone:          req.Timezone,
+	}, nil
 }

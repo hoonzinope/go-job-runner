@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
+	"github.com/hoonzinope/go-job-runner/internal/service"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
@@ -22,7 +23,8 @@ import (
 var templatesFS embed.FS
 
 type UI struct {
-	store  *store.Store
+	jobs   *service.JobService
+	runs   *service.RunService
 	reader *logwriter.Reader
 	tpl    *template.Template
 }
@@ -102,7 +104,7 @@ type runDetailPage struct {
 	CanCancel     bool
 }
 
-func New(st *store.Store, reader *logwriter.Reader) *UI {
+func New(jobs *service.JobService, runs *service.RunService, reader *logwriter.Reader) *UI {
 	if reader == nil {
 		reader = logwriter.NewReader()
 	}
@@ -182,7 +184,8 @@ func New(st *store.Store, reader *logwriter.Reader) *UI {
 	}).ParseFS(templatesFS, "templates/*.tmpl"))
 
 	return &UI{
-		store:  st,
+		jobs:   jobs,
+		runs:   runs,
 		reader: reader,
 		tpl:    tpl,
 	}
@@ -214,7 +217,7 @@ func (u *UI) listJobs(c *gin.Context) {
 		filter.ScheduleType = &v
 	}
 
-	jobs, total, err := u.store.Jobs.List(c.Request.Context(), filter, store.Page{Page: pageNum, Size: size})
+	jobs, total, err := u.jobs.ListJobs(c.Request.Context(), filter, store.Page{Page: pageNum, Size: size})
 	if err != nil {
 		u.renderError(c, http.StatusInternalServerError, "Jobs", err)
 		return
@@ -264,7 +267,7 @@ func (u *UI) editJob(c *gin.Context) {
 		u.renderError(c, http.StatusBadRequest, "Job edit", err)
 		return
 	}
-	job, err := u.store.Jobs.Get(c.Request.Context(), jobID)
+	job, err := u.jobs.GetJob(c.Request.Context(), jobID)
 	if err != nil {
 		u.renderError(c, http.StatusNotFound, "Job edit", err)
 		return
@@ -287,12 +290,12 @@ func (u *UI) jobDetail(c *gin.Context) {
 		u.renderError(c, http.StatusBadRequest, "Job detail", err)
 		return
 	}
-	job, err := u.store.Jobs.Get(c.Request.Context(), jobID)
+	job, err := u.jobs.GetJob(c.Request.Context(), jobID)
 	if err != nil {
 		u.renderError(c, http.StatusNotFound, "Job detail", err)
 		return
 	}
-	runs, total, err := u.store.Runs.ListByJob(c.Request.Context(), jobID, store.Page{Page: 1, Size: 10})
+	runs, total, err := u.jobs.ListJobRuns(c.Request.Context(), jobID, nil, store.Page{Page: 1, Size: 10})
 	if err != nil {
 		u.renderError(c, http.StatusInternalServerError, "Job detail", err)
 		return
@@ -334,7 +337,7 @@ func (u *UI) listRuns(c *gin.Context) {
 		}
 	}
 
-	runs, total, err := u.store.Runs.List(c.Request.Context(), filter, store.Page{Page: pageNum, Size: size})
+	runs, total, err := u.runs.ListRuns(c.Request.Context(), filter, store.Page{Page: pageNum, Size: size})
 	if err != nil {
 		u.renderError(c, http.StatusInternalServerError, "Runs", err)
 		return
@@ -342,7 +345,7 @@ func (u *UI) listRuns(c *gin.Context) {
 
 	items := make([]runListItem, 0, len(runs))
 	for i := range runs {
-		job, _ := u.store.Jobs.Get(c.Request.Context(), runs[i].JobID)
+		job, _ := u.jobs.GetJob(c.Request.Context(), runs[i].JobID)
 		item := runListItem{Run: runs[i]}
 		if job != nil {
 			item.JobName = job.Name
@@ -374,13 +377,13 @@ func (u *UI) runDetail(c *gin.Context) {
 		u.renderError(c, http.StatusBadRequest, "Run detail", err)
 		return
 	}
-	run, err := u.store.Runs.Get(c.Request.Context(), runID)
+	run, err := u.runs.GetRun(c.Request.Context(), runID)
 	if err != nil {
 		u.renderError(c, http.StatusNotFound, "Run detail", err)
 		return
 	}
-	job, _ := u.store.Jobs.Get(c.Request.Context(), run.JobID)
-	events, err := u.store.Events.ListByRun(c.Request.Context(), runID)
+	job, _ := u.jobs.GetJob(c.Request.Context(), run.JobID)
+	events, err := u.runs.ListRunEvents(c.Request.Context(), runID)
 	if err != nil {
 		u.renderError(c, http.StatusInternalServerError, "Run detail", err)
 		return

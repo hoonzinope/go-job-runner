@@ -13,6 +13,7 @@ import (
 	"github.com/hoonzinope/go-job-runner/internal/image"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/scheduler"
+	"github.com/hoonzinope/go-job-runner/internal/service"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
@@ -37,13 +38,15 @@ func NewAPIServer(cfg *config.Config, st *store.Store, sch *scheduler.Scheduler)
 func (s *APIServer) setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/health", handler.HealthzHandler)
-	ui := webui.New(s.Store, logwriter.NewReader())
+	jobService := service.NewJobService(s.Store, s.Scheduler)
+	runService := service.NewRunService(s.Store)
+	ui := webui.New(jobService, runService, logwriter.NewReader())
 	ui.RegisterRoutes(router)
 
 	api := router.Group("/api/v1")
 	{
-		jobHandler := handler.NewJobHandler(s.Store, s.Scheduler)
-		runHandler := handler.NewRunHandler(s.Store, logwriter.NewReader())
+		jobHandler := handler.NewJobHandler(jobService)
+		runHandler := handler.NewRunHandler(runService, logwriter.NewReader())
 		imageHandler := handler.NewImageHandler(s.ImageResolver)
 
 		api.GET("/jobs", jobHandler.ListJobs)

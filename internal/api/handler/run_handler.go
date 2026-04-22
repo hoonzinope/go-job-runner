@@ -12,19 +12,20 @@ import (
 
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
+	"github.com/hoonzinope/go-job-runner/internal/service"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
 
 type RunHandler struct {
-	store  *store.Store
-	reader *logwriter.Reader
+	service *service.RunService
+	reader  *logwriter.Reader
 }
 
-func NewRunHandler(st *store.Store, reader *logwriter.Reader) *RunHandler {
+func NewRunHandler(svc *service.RunService, reader *logwriter.Reader) *RunHandler {
 	if reader == nil {
 		reader = logwriter.NewReader()
 	}
-	return &RunHandler{store: st, reader: reader}
+	return &RunHandler{service: svc, reader: reader}
 }
 
 func (h *RunHandler) ListRuns(c *gin.Context) {
@@ -59,7 +60,7 @@ func (h *RunHandler) ListRuns(c *gin.Context) {
 		filter.To = &t
 	}
 
-	runs, total, err := h.store.Runs.List(c.Request.Context(), filter, store.Page{Page: page, Size: size})
+	runs, total, err := h.service.ListRuns(c.Request.Context(), filter, store.Page{Page: page, Size: size})
 	if err != nil {
 		internalError(c, err)
 		return
@@ -79,7 +80,7 @@ func (h *RunHandler) GetRun(c *gin.Context) {
 		return
 	}
 
-	run, err := h.store.Runs.Get(c.Request.Context(), runID)
+	run, err := h.service.GetRun(c.Request.Context(), runID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			notFound(c, fmt.Errorf("run %d not found", runID))
@@ -99,27 +100,11 @@ func (h *RunHandler) CancelRun(c *gin.Context) {
 		return
 	}
 
-	run, err := h.store.Runs.Get(c.Request.Context(), runID)
+	run, err := h.service.CancelRun(c.Request.Context(), runID)
 	if err != nil {
 		internalError(c, err)
 		return
 	}
-
-	switch run.Status {
-	case model.RunStatusPending:
-		run.Status = model.RunStatusCancelled
-	case model.RunStatusRunning, model.RunStatusCancelling:
-		run.Status = model.RunStatusCancelling
-	default:
-		c.JSON(http.StatusOK, toRunResponse(run))
-		return
-	}
-
-	if err := h.store.Runs.UpdateStatus(c.Request.Context(), run.ID, run.Status, run.StartedAt, run.FinishedAt, run.ExitCode, run.ErrorMessage); err != nil {
-		internalError(c, err)
-		return
-	}
-	run.UpdatedAt = time.Now().UTC()
 	c.JSON(http.StatusOK, toRunResponse(run))
 }
 
@@ -130,7 +115,7 @@ func (h *RunHandler) ListRunEvents(c *gin.Context) {
 		return
 	}
 
-	events, err := h.store.Events.ListByRun(c.Request.Context(), runID)
+	events, err := h.service.ListRunEvents(c.Request.Context(), runID)
 	if err != nil {
 		internalError(c, err)
 		return
@@ -150,21 +135,11 @@ func (h *RunHandler) GetRunLogs(c *gin.Context) {
 		return
 	}
 
-	run, err := h.store.Runs.Get(c.Request.Context(), runID)
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-	if run.LogPath == nil || *run.LogPath == "" {
-		c.JSON(http.StatusOK, logResponse{RunID: runID, Offset: 0, Size: 0, Content: ""})
-		return
-	}
-
 	offset := parseInt64Default(c.Query("offset"), 0)
 	limit := parseInt64Default(c.Query("limit"), 0)
 	tail := parseInt64Default(c.Query("tail"), 0)
 
-	content, start, size, err := h.reader.ReadContent(*run.LogPath, offset, limit, tail)
+	content, start, size, err := h.service.ReadLogs(c.Request.Context(), runID, h.reader, offset, limit, tail)
 	if err != nil {
 		internalError(c, err)
 		return
@@ -179,7 +154,7 @@ func (h *RunHandler) GetRunResult(c *gin.Context) {
 		return
 	}
 
-	run, err := h.store.Runs.Get(c.Request.Context(), runID)
+	run, err := h.service.GetRun(c.Request.Context(), runID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			notFound(c, fmt.Errorf("run %d not found", runID))
