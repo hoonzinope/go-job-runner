@@ -1,176 +1,348 @@
+<div align="center">
+
 # job-runner
 
-**Docker image 단위의 작업을 스케줄링하고 실행하는 단일 바이너리 스케줄러**
-A single-binary job scheduler that executes Docker image-based tasks on a schedule.
+**A lightweight Docker workload scheduler with a built-in Web UI.**
+
+Schedule Docker image workloads on cron or interval schedules. Tracks run history, logs, and artifacts entirely on disk — no external dependencies beyond SQLite.
+
+[![Docker Image](https://img.shields.io/docker/v/hoonzinope/image-job-runner?label=docker&logo=docker)](https://hub.docker.com/r/hoonzinope/image-job-runner)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.21+-00ADD8?logo=go)](go.mod)
+
+[한국어](README.ko.md)
+
+</div>
 
 ---
 
-## Overview
+## Table of Contents
 
-cron 또는 interval 기반 스케줄에 따라 Docker 컨테이너를 실행하고, 실행 이력과 로그를 관리하는 경량 스케줄러입니다.
-SQLite와 Docker socket만으로 동작하며, 별도의 외부 의존성이 없습니다.
-
-A lightweight scheduler that runs Docker containers on cron or interval schedules, tracking execution history and logs.
-Requires only SQLite and a Docker socket — no external dependencies.
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Web UI](#web-ui)
+- [Sample Images](#sample-images)
+- [Development](#development)
+- [Project Structure](#project-structure)
+- [License](#license)
 
 ---
 
 ## Features
 
-- **Cron / Interval 스케줄** — cron expression 또는 초 단위 interval 지원
-- **Concurrency Policy** — `forbid` (중복 실행 방지) / `allow` (독립 실행)
-- **Retry / Timeout** — 실패·타임아웃 시 재시도, 실행 시간 제한
-  - retry가 발생하면 새로운 Run 레코드가 생성되며, `/api/v1/runs`와 `/api/v1/jobs/:id/runs`에서 그대로 조회됩니다.
-- **Run 이력 관리** — 실행 상태, 로그 파일, 이벤트 스트림 조회
-- **Run Cancel** — 실행 중인 컨테이너 즉시 중단
-- **Web UI** — 작업 등록·수정·즉시 실행, 실행 이력 및 로그 조회
-- **REST API** — `/api/v1` prefix, JSON 응답
-
----
-
-## Requirements
-
-| 항목 | 버전 |
-|------|------|
-| Go | 1.22+ |
-| Docker | Docker daemon 실행 중 (`docker.sock` 접근 가능) |
-
----
-
-## Build & Run
-
-```bash
-# 빌드 / Build
-go build -o job-runner ./cmd
-
-# 실행 / Run (설정 파일 지정)
-./job-runner --config config.yaml
-```
-
----
-
-## Configuration
-
-`config.yaml` 예시:
-
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-
-store:
-  sqlite_path: /data/app.db
-  log_root: /data/logs
-  artifact_root: /data/artifacts
-
-scheduler:
-  due_job_scan_interval_sec: 2
-  dispatch_scan_interval_sec: 1
-  max_concurrent_runs: 3
-
-image:
-  allowed_sources:
-    - local
-    - remote
-  default_source: local
-  pull_policy: if_not_present  # always | if_not_present | never
-  allowed_prefixes:
-    - jobs/
-  remote:
-    endpoint: http://registry:5000
-    insecure: true
-
-ui:
-  title: my task scheduler
-```
-
-설정 우선순위: `기본값 < config.yaml < 환경 변수`
-Priority: `default < config.yaml < environment variables`
+- **Cron & interval schedules** — standard cron expressions or fixed-second intervals with timezone support
+- **Concurrency policy** — `allow` (run in parallel) or `forbid` (skip if already running)
+- **Retry & timeout** — configurable per-job retry limit and execution timeout
+- **Persistent run history** — every run, event, log, and artifact is stored locally via SQLite
+- **Web UI** — browse jobs and runs, view logs, trigger/cancel runs from the browser
+- **REST API** — full CRUD and operational endpoints under `/api/v1`
+- **Dual image sources** — pull images from a local path or a remote registry
+- **Self-contained** — single binary, single config file, no external broker or database server
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────────────────────────┐
-│   Web UI    │     │            Scheduler             │
-│  (HTML/JS)  │     │  ┌─────────────┐                │
-└──────┬──────┘     │  │ due-job loop│ (next_run_at   │
-       │            │  │             │  <= now 스캔)   │
-┌──────▼──────┐     │  └──────┬──────┘                │
-│  REST API   │     │         │ wakeup                 │
-│  /api/v1    │─────►  ┌──────▼──────┐                │
-└─────────────┘     │  │dispatch loop│ (pending run    │
-                    │  │             │  → worker 할당) │
-                    │  └──────┬──────┘                │
-                    │         │                        │
-                    │  ┌──────▼──────┐                │
-                    │  │   worker    │ (image pull     │
-                    │  │  goroutine  │  → container    │
-                    │  │             │  run → log)     │
-                    │  └─────────────┘                │
-                    └──────────────────────────────────┘
-                                   │
-                         ┌─────────▼─────────┐
-                         │  SQLite (WAL mode) │
-                         │  Docker socket     │
-                         └───────────────────┘
+┌──────────────────────────────────────────┐
+│                  job-runner              │
+│                                          │
+│  ┌─────────────┐   ┌──────────────────┐  │
+│  │  REST API   │   │     Web UI       │  │
+│  │  /api/v1    │   │  /jobs  /runs    │  │
+│  └──────┬──────┘   └────────┬─────────┘  │
+│         │                   │            │
+│  ┌──────▼───────────────────▼─────────┐  │
+│  │            Service Layer           │  │
+│  └──────────────────┬─────────────────┘  │
+│                     │                    │
+│  ┌──────────────────▼─────────────────┐  │
+│  │             Scheduler              │  │
+│  │  due-job loop → dispatch loop      │  │
+│  │            → worker goroutines     │  │
+│  └──────────────────┬─────────────────┘  │
+│                     │                    │
+│  ┌──────────────────▼──────────────────┐ │
+│  │   SQLite Store  │  Docker Executor  │ │
+│  │  jobs/runs/     │  image pull       │ │
+│  │  events/logs    │  container run    │ │
+│  └─────────────────┴───────────────────┘ │
+└──────────────────────────────────────────┘
+```
+
+**Scheduler internals:**
+
+| Loop | Responsibility |
+|---|---|
+| Due-job loop | Scans `next_run_at`, inserts `pending` runs |
+| Dispatch loop | Picks up `pending` runs, hands them to workers |
+| Worker goroutine | Resolves image → pulls → runs container → writes logs → updates status |
+
+---
+
+## Quick Start
+
+### 1. Pull the image
+
+```bash
+docker pull hoonzinope/image-job-runner:latest
+# or pin to a release
+docker pull hoonzinope/image-job-runner:v1.0.1
+```
+
+### 2. Create a config file
+
+```bash
+mkdir -p ~/docker_v/image-job-runner
+cp config.example.yaml ~/docker_v/image-job-runner/config.yml
+# edit the file as needed
+```
+
+### 3. Run
+
+```bash
+docker run -d --name image-job-runner \
+  -p 8888:8888 \
+  -v ~/docker_v/image-job-runner/config.yml:/app/config.yml:ro \
+  -v ~/docker_v/image-job-runner:/app/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  hoonzinope/image-job-runner:latest
+```
+
+### 4. Open the UI
+
+```
+http://localhost:8888/jobs
 ```
 
 ---
 
-## API Overview
+## Configuration
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `GET` | `/api/v1/jobs` | Job 목록 조회 (페이징) |
-| `POST` | `/api/v1/jobs` | Job 생성 |
-| `GET` | `/api/v1/jobs/:id` | Job 단건 조회 |
-| `PUT` | `/api/v1/jobs/:id` | Job 수정 |
-| `DELETE` | `/api/v1/jobs/:id` | Job 삭제 (hard delete) |
-| `POST` | `/api/v1/jobs/:id/trigger` | Job 즉시 실행 |
-| `GET` | `/api/v1/jobs/:id/runs` | Job 기준 Run 목록 |
-| `GET` | `/api/v1/runs` | Run 목록 조회 (페이징) |
-| `GET` | `/api/v1/runs/:id` | Run 단건 조회 |
-| `POST` | `/api/v1/runs/:id/cancel` | Run 취소 |
-| `GET` | `/api/v1/runs/:id/events` | Run 이벤트 조회 |
-| `GET` | `/api/v1/runs/:id/logs` | Run 로그 조회 (offset/tail) |
-| `GET` | `/api/v1/images` | 이미지 후보 목록 |
-| `GET` | `/api/v1/images/resolve` | 이미지 검증/해석 |
+The repository ships `config.example.yaml` as a template. Keep your active config outside the repository.
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8888
+
+store:
+  sqlite_path: ./data/app.db
+  log_root: ./data/logs
+  log_path_pattern: job-%d/run-%d/run.log
+  artifact_root: ./data/artifacts
+  result_path_pattern: job-%d/run-%d/result.json
+
+scheduler:
+  due_job_scan_interval_sec: 2   # how often to check for due jobs
+  dispatch_scan_interval_sec: 1  # how often to dispatch pending runs
+  max_concurrent_runs: 2         # global worker pool size
+
+image:
+  allowed_sources:               # which source types are permitted
+    - local
+    - remote
+  default_source: local
+  pull_policy: if_not_present    # always | if_not_present | never
+  allowed_prefixes:              # image ref must match one of these
+    - example-image/
+    - jobs/
+  remote:
+    endpoint: http://192.168.215.1:5001
+    insecure: true
+```
+
+### Key fields
+
+| Field | Description |
+|---|---|
+| `store.sqlite_path` | Path to the SQLite database file |
+| `store.log_root` | Root directory for run log files |
+| `store.artifact_root` | Root directory for run result/artifact files |
+| `scheduler.max_concurrent_runs` | Maximum number of runs executing simultaneously |
+| `image.pull_policy` | `always` re-pulls on every run; `if_not_present` skips if the image exists locally |
+| `image.allowed_prefixes` | Whitelist of image ref prefixes; requests outside this list are rejected |
+
+---
+
+## API Reference
+
+All endpoints are under `/api/v1`.
+
+### Jobs
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/jobs` | List jobs (paginated) |
+| `POST` | `/api/v1/jobs` | Create a job |
+| `GET` | `/api/v1/jobs/:id` | Get a job |
+| `PUT` | `/api/v1/jobs/:id` | Update a job |
+| `DELETE` | `/api/v1/jobs/:id` | Delete a job |
+| `POST` | `/api/v1/jobs/:id/trigger` | Trigger a job immediately |
+| `GET` | `/api/v1/jobs/:id/runs` | List runs for a job |
+
+**Job request body fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique job name |
+| `enabled` | bool | Whether the job is active |
+| `sourceType` | `local` \| `remote` | Image source |
+| `imageRef` | string | Image reference (e.g. `jobs/my-image:latest`) |
+| `scheduleType` | `cron` \| `interval` | Schedule type |
+| `scheduleExpr` | string | Cron expression (when `scheduleType=cron`) |
+| `intervalSec` | number | Interval in seconds (when `scheduleType=interval`) |
+| `timezone` | string | IANA timezone (default: `UTC`) |
+| `concurrencyPolicy` | `allow` \| `forbid` | What to do when the job is already running |
+| `retryLimit` | number | Number of retries on failure (0 = no retry) |
+| `timeoutSec` | number | Execution timeout in seconds (0 = no timeout) |
+| `params` | object | Arbitrary JSON passed to the container as environment variables |
+
+### Runs
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/runs` | List runs (paginated) |
+| `GET` | `/api/v1/runs/:id` | Get a run |
+| `POST` | `/api/v1/runs/:id/cancel` | Cancel a run |
+| `GET` | `/api/v1/runs/:id/events` | Get run events |
+| `GET` | `/api/v1/runs/:id/logs` | Stream or page run logs |
+
+**Run status values:** `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`
+
+**Log query parameters:**
+
+| Parameter | Description |
+|---|---|
+| `offset` | Byte offset to start reading from |
+| `limit` | Maximum number of bytes to return |
+| `tail` | Return last N lines |
+
+### Images
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/images` | List image candidates |
+| `GET` | `/api/v1/images/resolve` | Resolve or validate an image ref |
+
+---
+
+## Web UI
+
+The built-in Web UI is served at `/jobs`.
+
+| Path | Description |
+|---|---|
+| `/jobs` | Job list — search, filter, create, trigger, delete |
+| `/jobs/new` | Create a new job |
+| `/jobs/:id` | Job detail — settings and recent run history |
+| `/jobs/:id/edit` | Edit a job |
+| `/runs` | Run list — filter by status, date range, job |
+| `/runs/:id` | Run detail — status, events timeline, logs, result |
+
+---
+
+## Sample Images
+
+Two sample workloads are included under `example-image/`:
+
+| Path | Source type | Notes |
+|---|---|---|
+| `example-image/local` | `local` | Builds and runs directly from the local filesystem |
+| `example-image/remote` | `remote` | Pushed to a local registry; requires the `remote` endpoint in config |
+
+Both print a `hello world image test` message with execution metadata, are scheduled once per minute, and start after a short delay — useful for verifying scheduling and log capture.
+
+---
+
+## Development
+
+**Prerequisites:** Go 1.21+, Docker
+
+```bash
+# Build
+go build -o bin/job-runner ./cmd
+
+# Run all tests
+go test ./...
+
+# Run locally
+cp config.example.yaml config.yml
+./bin/job-runner --config config.yml
+```
+
+**Docker-based development:**
+
+```bash
+docker build -t job-runner:local .
+
+docker run --rm -p 8888:8888 \
+  -v $(pwd)/config.yml:/app/config.yml:ro \
+  -v $(pwd)/data:/app/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  job-runner:local
+```
+
+**Build the sample images:**
+
+```bash
+# local sample
+docker build -t example-image/local:latest example-image/local/
+
+# remote sample (push to your local registry)
+docker build -t localhost:5001/example-image/remote:latest example-image/remote/
+docker push localhost:5001/example-image/remote:latest
+```
 
 ---
 
 ## Project Structure
 
-```
+```text
 cmd/
-  main.go
+  main.go                    # entry point
+
 internal/
   api/
-    handler/          # REST API 핸들러
-    ui/               # Web UI 핸들러 + 템플릿
-    router.go
+    router.go                # route registration
+    handler/                 # REST API handlers (jobs, runs, images)
+    ui/                      # Web UI handlers and HTML templates
+
   scheduler/
-    scheduler.go      # 전체 오케스트레이션
-    due_job.go        # due-job loop
-    dispatch.go       # dispatch loop
-    worker.go         # worker goroutine
+    scheduler.go             # orchestration and lifecycle
+    due_job.go               # due-job scanning loop
+    dispatch.go              # dispatch loop
+    worker.go                # worker goroutine (pull → run → log → status)
+
   store/
-    db.go             # SQLite 초기화 (WAL 모드)
+    db.go                    # SQLite init and migrations
     job_repo.go
     run_repo.go
     event_repo.go
-  model/              # Job / Run / RunEvent 모델
-  image/              # local / remote 이미지 소스
+
+  model/                     # Job, Run, RunEvent types
+
+  image/
+    local.go                 # local filesystem image source
+    remote.go                # remote registry image source
+    source.go                # source interface
+
   executor/
-    docker.go         # 컨테이너 실행
-  config/             # 설정 로드 및 검증
-  log/
-    writer.go         # stdout/stderr 파일 저장
+    docker.go                # Docker container execution
+
+  service/
+    job_service.go
+    run_service.go
+
+  config/                    # config loading and validation
+  log/                       # run log and result writers/readers
 ```
 
 ---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
