@@ -33,6 +33,7 @@ type imageResolver interface {
 
 type containerRunner interface {
 	EnsureImage(context.Context, string) error
+	PrepareContainer(context.Context, string) error
 	RunContainer(context.Context, string, string, int, string, io.Writer, io.Writer) error
 }
 
@@ -93,6 +94,9 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	defer resultFile.Close()
 
 	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
+	if err := e.runner.PrepareContainer(ctx, containerName); err != nil {
+		return nil, err
+	}
 	if err := e.runner.RunContainer(ctx, containerName, pullRef, job.TimeoutSec, jobParamsJSON(job), logFile, logFile); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return &ExecutionResult{
@@ -181,6 +185,21 @@ func (r *realDockerRunner) EnsureImage(ctx context.Context, imageRef string) err
 	default:
 		return fmt.Errorf("unsupported pull policy %q", r.pullPolicy)
 	}
+}
+
+func (r *realDockerRunner) PrepareContainer(ctx context.Context, containerName string) error {
+	out, err := exec.CommandContext(ctx, "docker", "rm", "-f", containerName).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return nil
+	}
+	if strings.Contains(trimmed, "No such container") {
+		return nil
+	}
+	return fmt.Errorf("docker rm -f %q: %w: %s", containerName, err, trimmed)
 }
 
 func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {

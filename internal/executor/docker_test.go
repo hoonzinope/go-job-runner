@@ -50,10 +50,12 @@ func (r *fakeResolver) Resolve(context.Context, string, string) (*image.Candidat
 
 type fakeRunner struct {
 	ensureErr error
+	prepareErr error
 	runErr    error
 
 	mu            sync.Mutex
 	ensureCalls   int
+	prepareCalls  int
 	runCalls      int
 	lastContainer string
 	lastImageRef  string
@@ -67,6 +69,13 @@ func (r *fakeRunner) EnsureImage(context.Context, string) error {
 	defer r.mu.Unlock()
 	r.ensureCalls++
 	return r.ensureErr
+}
+
+func (r *fakeRunner) PrepareContainer(context.Context, string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.prepareCalls++
+	return r.prepareErr
 }
 
 func (r *fakeRunner) RunContainer(_ context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {
@@ -116,6 +125,9 @@ func TestExecuteHappyPath(t *testing.T) {
 	}
 	if runner.ensureCalls != 1 || runner.runCalls != 1 {
 		t.Fatalf("runner call count mismatch: %+v", runner)
+	}
+	if runner.prepareCalls != 1 {
+		t.Fatalf("prepare call count mismatch: %+v", runner)
 	}
 	if runner.lastContainer != "job-runner-run-41-42" {
 		t.Fatalf("container name mismatch: %q", runner.lastContainer)

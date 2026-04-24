@@ -24,7 +24,7 @@ RUN apk add --no-cache docker-cli ca-certificates && \
     mkdir -p /app/data /app/logs /app/artifacts
 
 COPY --from=builder /out/job-runner /app/job-runner
-COPY config.yml /app/config.yml
+COPY config.example.yaml /app/config.yml
 
 EXPOSE 8888
 
