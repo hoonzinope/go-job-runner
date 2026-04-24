@@ -35,6 +35,7 @@
 
 <section class="card">
   {{ if .Runs }}
+  <div class="table-shell">
   <table>
     <thead>
       <tr>
@@ -64,6 +65,7 @@
       {{ end }}
     </tbody>
   </table>
+  </div>
   {{ else }}
   <div class="empty">No runs found.</div>
   {{ end }}

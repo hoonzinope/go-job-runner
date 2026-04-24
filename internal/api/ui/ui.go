@@ -135,26 +135,29 @@ func New(jobs *service.JobService, runs *service.RunService, resolver *image.Res
 			return t.UTC().Format("2006-01-02 15:04:05 UTC")
 		},
 		"formatValue": func(v any) string {
-			switch x := v.(type) {
-			case nil:
+			value := reflect.ValueOf(v)
+			for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer) {
+				if value.IsNil() {
+					return "—"
+				}
+				value = value.Elem()
+			}
+			if !value.IsValid() {
 				return "—"
-			case string:
-				if strings.TrimSpace(x) == "" {
+			}
+			switch value.Kind() {
+			case reflect.String:
+				if strings.TrimSpace(value.String()) == "" {
 					return "—"
 				}
-				return x
-			case *string:
-				if x == nil || strings.TrimSpace(*x) == "" {
-					return "—"
-				}
-				return *x
-			case bool:
-				if x {
+				return value.String()
+			case reflect.Bool:
+				if value.Bool() {
 					return "true"
 				}
 				return "false"
 			default:
-				return fmt.Sprint(x)
+				return fmt.Sprint(value.Interface())
 			}
 		},
 		"inputString": func(v *string) string {

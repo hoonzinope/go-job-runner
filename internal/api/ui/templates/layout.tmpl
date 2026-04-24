@@ -91,6 +91,12 @@
       box-shadow: 0 12px 30px rgba(20, 42, 75, 0.06);
     }
     .card + .card { margin-top: 18px; }
+    .table-shell {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
     .grid {
       display: grid;
       gap: 16px;
@@ -152,6 +158,9 @@
     table {
       width: 100%;
       border-collapse: collapse;
+    }
+    .table-shell table {
+      min-width: 100%;
     }
     th, td {
       padding: 12px 10px;
@@ -227,6 +236,9 @@
       .meta-row {
         grid-template-columns: 1fr;
         gap: 4px;
+      }
+      .table-shell table {
+        min-width: 720px;
       }
     }
   </style>

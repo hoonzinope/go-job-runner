@@ -37,6 +37,7 @@
 <section class="card">
   <h2 class="section-title">Events</h2>
   {{ if .Events }}
+  <div class="table-shell">
   <table>
     <thead>
       <tr>
@@ -55,6 +56,7 @@
       {{ end }}
     </tbody>
   </table>
+  </div>
   {{ else }}
   <div class="empty">No events recorded.</div>
   {{ end }}
