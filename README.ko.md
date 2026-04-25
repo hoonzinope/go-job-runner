@@ -120,6 +120,8 @@ docker run -d --name image-job-runner \
 http://localhost:8888/jobs
 ```
 
+> 보안 안내: 내장 Web UI와 REST API에는 인증/인가 기능이 없습니다. 서버를 `0.0.0.0` 또는 다른 non-loopback 주소에 바인딩할 경우, 외부에 노출하기 전에 인증이 붙은 reverse proxy, VPN, 또는 IP allowlist 뒤에 두세요.
+
 ---
 
 ## 설정
@@ -128,6 +130,8 @@ http://localhost:8888/jobs
 
 ```yaml
 server:
+  # 로컬 전용이면 127.0.0.1을 사용하세요.
+  # 0.0.0.0에 바인딩하면 UI/API가 네트워크에 노출됩니다.
   host: 0.0.0.0
   port: 8888
 
@@ -167,6 +171,8 @@ image:
 | `scheduler.max_concurrent_runs` | 동시에 실행 가능한 최대 실행 수 |
 | `image.pull_policy` | `always`는 매 실행마다 재풀; `if_not_present`는 이미지가 있으면 생략 |
 | `image.allowed_prefixes` | 이미지 ref 접두사 허용 목록; 목록 외의 요청은 거부됨 |
+
+내장 인증은 제공되지 않습니다. 서비스가 non-loopback 주소에서 접근 가능하다면, 신뢰할 수 있는 환경 밖에서 사용하기 전에 reverse proxy, VPN, 또는 IP allowlist로 보호하세요.
 
 ---
 

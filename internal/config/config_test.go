@@ -224,6 +224,35 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestRequiresExternalProtection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		host string
+		want bool
+	}{
+		{name: "localhost", host: "localhost", want: false},
+		{name: "ipv4 loopback", host: "127.0.0.1", want: false},
+		{name: "ipv6 loopback", host: "::1", want: false},
+		{name: "unspecified ipv4", host: "0.0.0.0", want: true},
+		{name: "unspecified ipv6", host: "::", want: true},
+		{name: "private ipv4", host: "192.168.1.10", want: true},
+		{name: "hostname", host: "runner.local", want: true},
+		{name: "bracketed ipv6 loopback", host: "[::1]", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := RequiresExternalProtection(tt.host); got != tt.want {
+				t.Fatalf("RequiresExternalProtection(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
 func validConfig() Config {
 	return Config{
 		Server: ServerConfig{

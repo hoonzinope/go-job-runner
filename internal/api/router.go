@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -72,6 +73,10 @@ func (s *APIServer) setupRouter() *gin.Engine {
 }
 
 func (s *APIServer) StartServer(ctx context.Context) error {
+	if config.RequiresExternalProtection(s.Host) {
+		log.Printf("WARNING: server.host=%q binds the Web UI and REST API on a non-loopback interface. This project does not provide built-in authentication; protect it with a reverse proxy, VPN, or IP allowlist before exposing it externally.", s.Host)
+	}
+
 	router := s.setupRouter()
 	server := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", s.Host, s.Port),

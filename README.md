@@ -120,6 +120,8 @@ docker run -d --name image-job-runner \
 http://localhost:8888/jobs
 ```
 
+> Security note: the built-in Web UI and REST API do not include authentication or authorization. If you bind the server to `0.0.0.0` or any non-loopback address, place it behind a reverse proxy with auth, a VPN, or an IP allowlist before exposing it outside a trusted network.
+
 ---
 
 ## Configuration
@@ -128,6 +130,8 @@ The repository ships `config.example.yaml` as a template. Keep your active confi
 
 ```yaml
 server:
+  # Use 127.0.0.1 for local-only access.
+  # Binding to 0.0.0.0 exposes the UI/API on the network.
   host: 0.0.0.0
   port: 8888
 
@@ -167,6 +171,8 @@ image:
 | `scheduler.max_concurrent_runs` | Maximum number of runs executing simultaneously |
 | `image.pull_policy` | `always` re-pulls on every run; `if_not_present` skips if the image exists locally |
 | `image.allowed_prefixes` | Whitelist of image ref prefixes; requests outside this list are rejected |
+
+Built-in authentication is not provided. If the service is reachable on a non-loopback address, protect it with a reverse proxy, VPN, or IP allowlist before using it outside a trusted environment.
 
 ---
 

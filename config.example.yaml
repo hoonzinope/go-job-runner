@@ -1,4 +1,6 @@
 server:
+  # Use 127.0.0.1 for local-only access.
+  # Binding to 0.0.0.0 or a non-loopback address exposes the UI/API to the network.
   host: 0.0.0.0
   port: 8888
 
