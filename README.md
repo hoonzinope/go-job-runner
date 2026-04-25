@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="job-runner logo" width="220" />
+
 # job-runner
 
 **A lightweight Docker workload scheduler with a built-in Web UI.**

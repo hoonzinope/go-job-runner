@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="job-runner logo" width="220" />
+
 # job-runner
 
 **내장 Web UI를 갖춘 경량 Docker 워크로드 스케줄러.**
