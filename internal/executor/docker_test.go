@@ -50,13 +50,15 @@ func (r *fakeResolver) Resolve(context.Context, string, string) (*image.Candidat
 }
 
 type fakeRunner struct {
-	ensureErr error
+	ensureErr  error
 	prepareErr error
-	runErr    error
+	runErr     error
 
 	mu            sync.Mutex
 	ensureCalls   int
 	prepareCalls  int
+	cleanupCalls  int
+	recoverCalls  int
 	runCalls      int
 	lastContainer string
 	lastImageRef  string
@@ -79,13 +81,13 @@ func (r *fakeRunner) PrepareContainer(context.Context, string) error {
 	return r.prepareErr
 }
 
-func (r *fakeRunner) RunContainer(_ context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {
+func (r *fakeRunner) RunContainer(_ context.Context, spec containerSpec, stdout, stderr io.Writer) error {
 	r.mu.Lock()
 	r.runCalls++
-	r.lastContainer = containerName
-	r.lastImageRef = imageRef
-	r.lastTimeout = timeoutSec
-	r.lastParams = paramsJSON
+	r.lastContainer = spec.Name
+	r.lastImageRef = spec.ImageRef
+	r.lastTimeout = spec.TimeoutSec
+	r.lastParams = spec.ParamsJSON
 	r.mu.Unlock()
 
 	if r.stdoutWrites != "" {
@@ -95,6 +97,20 @@ func (r *fakeRunner) RunContainer(_ context.Context, containerName, imageRef str
 		_, _ = stderr.Write([]byte("stderr:" + r.stdoutWrites))
 	}
 	return r.runErr
+}
+
+func (r *fakeRunner) CleanupContainer(context.Context, string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupCalls++
+	return nil
+}
+
+func (r *fakeRunner) RecoverOrphans(context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recoverCalls++
+	return nil
 }
 
 func TestExecuteHappyPath(t *testing.T) {
@@ -165,23 +181,35 @@ func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
 	t.Parallel()
 
 	args := dockerRunArgs(
-		"job-runner-run-41-42",
-		"registry.example/jobs/example:latest",
-		30,
-		`{"foo":"bar"}`,
+		containerSpec{
+			Name:       "job-runner-run-41-42",
+			JobID:      41,
+			RunID:      42,
+			ImageRef:   "registry.example/jobs/example:latest",
+			TimeoutSec: 30,
+			ParamsJSON: `{"foo":"bar"}`,
+		},
 		config.ExecutorConfig{
-			NetworkMode:    "none",
-			ReadOnlyRootFS: true,
-			MemoryLimitMB:  512,
-			CPULimit:       1.5,
+			NetworkMode:        "none",
+			ReadOnlyRootFS:     true,
+			MemoryLimitMB:      512,
+			CPULimit:           1.5,
+			StopGracePeriodSec: 10,
 		},
 	)
 
 	want := []string{
 		"run",
-		"--rm",
 		"--name",
 		"job-runner-run-41-42",
+		"--label",
+		"go-job-runner.managed=true",
+		"--label",
+		"go-job-runner=true",
+		"--label",
+		"go-job-runner.job-id=41",
+		"--label",
+		"go-job-runner.run-id=42",
 		"--network",
 		"none",
 		"--security-opt",
@@ -192,7 +220,7 @@ func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
 		"--cpus",
 		"1.5",
 		"--stop-timeout",
-		"30",
+		"10",
 		"-e",
 		"JOB_PARAMS={\"foo\":\"bar\"}",
 		"registry.example/jobs/example:latest",

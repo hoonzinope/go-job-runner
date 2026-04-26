@@ -37,3 +37,6 @@ executor:
   read_only_rootfs: false
   memory_limit_mb: 0
   cpu_limit: 0
+  cleanup_containers: true
+  stop_grace_period_sec: 10
+  orphan_recovery_on_startup: true

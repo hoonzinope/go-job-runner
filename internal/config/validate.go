@@ -103,6 +103,9 @@ func (c *Config) Validate() error {
 	if c.Executor.CPULimit < 0 {
 		return fmt.Errorf("executor cpu_limit must be >= 0")
 	}
+	if c.Executor.StopGracePeriodSec < 0 {
+		return fmt.Errorf("executor stop_grace_period_sec must be >= 0")
+	}
 	return nil
 }
 

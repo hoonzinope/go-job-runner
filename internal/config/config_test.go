@@ -47,6 +47,9 @@ executor:
   read_only_rootfs: true
   memory_limit_mb: 512
   cpu_limit: 1.5
+  cleanup_containers: true
+  stop_grace_period_sec: 10
+  orphan_recovery_on_startup: true
 `)
 
 	cfg, err := LoadConfig(dir)
@@ -69,7 +72,7 @@ executor:
 	if cfg.Image.Remote.Endpoint != "http://registry:5000" || !cfg.Image.Remote.Insecure {
 		t.Fatalf("unexpected remote config: %+v", cfg.Image.Remote)
 	}
-	if cfg.Executor.NetworkMode != "bridge" || !cfg.Executor.ReadOnlyRootFS || cfg.Executor.MemoryLimitMB != 512 || cfg.Executor.CPULimit != 1.5 {
+	if cfg.Executor.NetworkMode != "bridge" || !cfg.Executor.ReadOnlyRootFS || cfg.Executor.MemoryLimitMB != 512 || cfg.Executor.CPULimit != 1.5 || !cfg.Executor.CleanupContainers || cfg.Executor.StopGracePeriodSec != 10 || !cfg.Executor.OrphanRecoveryOnStartup {
 		t.Fatalf("unexpected executor config: %+v", cfg.Executor)
 	}
 }
@@ -258,6 +261,13 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: "executor cpu_limit must be >= 0",
 		},
+		{
+			name: "negative executor stop grace period",
+			mutate: func(c *Config) {
+				c.Executor.StopGracePeriodSec = -1
+			},
+			wantErr: "executor stop_grace_period_sec must be >= 0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -346,10 +356,13 @@ func validConfig() Config {
 			},
 		},
 		Executor: ExecutorConfig{
-			NetworkMode:    "bridge",
-			ReadOnlyRootFS: true,
-			MemoryLimitMB:  512,
-			CPULimit:       1.5,
+			NetworkMode:             "bridge",
+			ReadOnlyRootFS:          true,
+			MemoryLimitMB:           512,
+			CPULimit:                1.5,
+			CleanupContainers:       true,
+			StopGracePeriodSec:      10,
+			OrphanRecoveryOnStartup: true,
 		},
 	}
 }

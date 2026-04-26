@@ -36,10 +36,13 @@ type ImageConfig struct {
 }
 
 type ExecutorConfig struct {
-	NetworkMode    string  `yaml:"network_mode" mapstructure:"network_mode"`
-	ReadOnlyRootFS bool    `yaml:"read_only_rootfs" mapstructure:"read_only_rootfs"`
-	MemoryLimitMB  int     `yaml:"memory_limit_mb" mapstructure:"memory_limit_mb"`
-	CPULimit       float64 `yaml:"cpu_limit" mapstructure:"cpu_limit"`
+	NetworkMode             string  `yaml:"network_mode" mapstructure:"network_mode"`
+	ReadOnlyRootFS          bool    `yaml:"read_only_rootfs" mapstructure:"read_only_rootfs"`
+	MemoryLimitMB           int     `yaml:"memory_limit_mb" mapstructure:"memory_limit_mb"`
+	CPULimit                float64 `yaml:"cpu_limit" mapstructure:"cpu_limit"`
+	CleanupContainers       bool    `yaml:"cleanup_containers" mapstructure:"cleanup_containers"`
+	StopGracePeriodSec      int     `yaml:"stop_grace_period_sec" mapstructure:"stop_grace_period_sec"`
+	OrphanRecoveryOnStartup bool    `yaml:"orphan_recovery_on_startup" mapstructure:"orphan_recovery_on_startup"`
 }
 
 type Config struct {

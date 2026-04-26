@@ -18,6 +18,14 @@ import (
 	"github.com/hoonzinope/go-job-runner/internal/model"
 )
 
+const (
+	containerNamePrefix   = "job-runner-run"
+	containerLabelManaged = "go-job-runner.managed"
+	containerLabelApp     = "go-job-runner"
+	containerLabelRunID   = "go-job-runner.run-id"
+	containerLabelJobID   = "go-job-runner.job-id"
+)
+
 type ExecutionResult struct {
 	ExitCode    int
 	LogPath     string
@@ -34,7 +42,9 @@ type imageResolver interface {
 type containerRunner interface {
 	EnsureImage(context.Context, string) error
 	PrepareContainer(context.Context, string) error
-	RunContainer(context.Context, string, string, int, string, io.Writer, io.Writer) error
+	RunContainer(context.Context, containerSpec, io.Writer, io.Writer) error
+	CleanupContainer(context.Context, string) error
+	RecoverOrphans(context.Context) error
 }
 
 type DockerExecutor struct {
@@ -51,6 +61,13 @@ func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig,
 		logWriter:    logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
 		resultWriter: logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
 	}
+}
+
+func (e *DockerExecutor) RecoverOrphans(ctx context.Context) error {
+	if e == nil || e.runner == nil {
+		return fmt.Errorf("executor is not configured")
+	}
+	return e.runner.RecoverOrphans(ctx)
 }
 
 func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model.Run) (*ExecutionResult, error) {
@@ -93,11 +110,19 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}
 	defer resultFile.Close()
 
-	containerName := fmt.Sprintf("job-runner-run-%d-%d", run.JobID, run.ID)
+	containerName := runnerContainerName(run.JobID, run.ID)
 	if err := e.runner.PrepareContainer(ctx, containerName); err != nil {
 		return nil, err
 	}
-	if err := e.runner.RunContainer(ctx, containerName, pullRef, job.TimeoutSec, jobParamsJSON(job), logFile, logFile); err != nil {
+	spec := containerSpec{
+		Name:       containerName,
+		JobID:      job.ID,
+		RunID:      run.ID,
+		ImageRef:   pullRef,
+		TimeoutSec: job.TimeoutSec,
+		ParamsJSON: jobParamsJSON(job),
+	}
+	if err := e.runner.RunContainer(ctx, spec, logFile, logFile); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return &ExecutionResult{
 				ExitCode:    -1,
@@ -159,6 +184,15 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}, nil
 }
 
+type containerSpec struct {
+	Name       string
+	JobID      int64
+	RunID      int64
+	ImageRef   string
+	TimeoutSec int
+	ParamsJSON string
+}
+
 type realDockerRunner struct {
 	pullPolicy string
 	execCfg    config.ExecutorConfig
@@ -189,7 +223,44 @@ func (r *realDockerRunner) EnsureImage(ctx context.Context, imageRef string) err
 }
 
 func (r *realDockerRunner) PrepareContainer(ctx context.Context, containerName string) error {
-	out, err := exec.CommandContext(ctx, "docker", "rm", "-f", containerName).CombinedOutput()
+	return r.removeContainer(ctx, containerName, true)
+}
+
+func (r *realDockerRunner) CleanupContainer(ctx context.Context, containerName string) error {
+	if !r.execCfg.CleanupContainers {
+		return nil
+	}
+	return r.removeContainer(ctx, containerName, true)
+}
+
+func (r *realDockerRunner) RecoverOrphans(ctx context.Context) error {
+	if !r.execCfg.OrphanRecoveryOnStartup {
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "label="+containerLabelManaged+"=true").CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			return fmt.Errorf("docker orphan scan: %w: %s", err, trimmed)
+		}
+		return fmt.Errorf("docker orphan scan: %w", err)
+	}
+	ids := strings.Fields(string(out))
+	for _, id := range ids {
+		if err := r.removeContainer(ctx, id, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *realDockerRunner) removeContainer(ctx context.Context, containerName string, force bool) error {
+	args := []string{"rm"}
+	if force {
+		args = append(args, "-f")
+	}
+	args = append(args, containerName)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -203,8 +274,8 @@ func (r *realDockerRunner) PrepareContainer(ctx context.Context, containerName s
 	return fmt.Errorf("docker rm -f %q: %w: %s", containerName, err, trimmed)
 }
 
-func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {
-	args := dockerRunArgs(containerName, imageRef, timeoutSec, paramsJSON, r.execCfg)
+func (r *realDockerRunner) RunContainer(ctx context.Context, spec containerSpec, stdout, stderr io.Writer) error {
+	args := dockerRunArgs(spec, r.execCfg)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -220,19 +291,49 @@ func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imag
 
 	select {
 	case <-ctx.Done():
-		stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = exec.CommandContext(stopCtx, "docker", "stop", containerName).Run()
+		stopCtx, cancelStop := context.WithTimeout(context.Background(), r.stopGracePeriod())
+		_ = exec.CommandContext(stopCtx, "docker", "stop", "-t", strconv.Itoa(r.stopGracePeriodSec()), spec.Name).Run()
 		cancelStop()
 		_ = cmd.Process.Kill()
 		_ = <-waitCh
+		_ = r.CleanupContainer(context.Background(), spec.Name)
 		return ctx.Err()
 	case err := <-waitCh:
+		if cleanupErr := r.CleanupContainer(context.Background(), spec.Name); cleanupErr != nil {
+			if err != nil {
+				return errors.Join(err, fmt.Errorf("cleanup container %q: %w", spec.Name, cleanupErr))
+			}
+			return cleanupErr
+		}
 		return err
 	}
 }
 
-func dockerRunArgs(containerName, imageRef string, timeoutSec int, paramsJSON string, execCfg config.ExecutorConfig) []string {
-	args := []string{"run", "--rm", "--name", containerName}
+func (r *realDockerRunner) stopGracePeriodSec() int {
+	if r.execCfg.StopGracePeriodSec < 0 {
+		return 0
+	}
+	return r.execCfg.StopGracePeriodSec
+}
+
+func (r *realDockerRunner) stopGracePeriod() time.Duration {
+	return time.Duration(r.stopGracePeriodSec()+5) * time.Second
+}
+
+func dockerRunArgs(spec containerSpec, execCfg config.ExecutorConfig) []string {
+	args := []string{
+		"run",
+		"--name",
+		spec.Name,
+		"--label",
+		containerLabelManaged + "=true",
+		"--label",
+		containerLabelApp + "=true",
+		"--label",
+		fmt.Sprintf("%s=%d", containerLabelJobID, spec.JobID),
+		"--label",
+		fmt.Sprintf("%s=%d", containerLabelRunID, spec.RunID),
+	}
 
 	switch strings.ToLower(strings.TrimSpace(execCfg.NetworkMode)) {
 	case "", "bridge":
@@ -250,14 +351,18 @@ func dockerRunArgs(containerName, imageRef string, timeoutSec int, paramsJSON st
 	if execCfg.CPULimit > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(execCfg.CPULimit, 'f', -1, 64))
 	}
-	if timeoutSec > 0 {
-		args = append(args, "--stop-timeout", strconv.Itoa(timeoutSec))
+	if execCfg.StopGracePeriodSec > 0 {
+		args = append(args, "--stop-timeout", strconv.Itoa(execCfg.StopGracePeriodSec))
 	}
-	if strings.TrimSpace(paramsJSON) != "" {
-		args = append(args, "-e", "JOB_PARAMS="+paramsJSON)
+	if strings.TrimSpace(spec.ParamsJSON) != "" {
+		args = append(args, "-e", "JOB_PARAMS="+spec.ParamsJSON)
 	}
-	args = append(args, imageRef)
+	args = append(args, spec.ImageRef)
 	return args
+}
+
+func runnerContainerName(jobID, runID int64) string {
+	return fmt.Sprintf("%s-%d-%d", containerNamePrefix, jobID, runID)
 }
 
 func (e *DockerExecutor) writeResult(resultFile *os.File, record *logwriter.ResultRecord) error {

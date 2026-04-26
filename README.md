@@ -169,6 +169,9 @@ executor:
   read_only_rootfs: false        # enable only after checking workloads
   memory_limit_mb: 0             # 0 = unlimited
   cpu_limit: 0                   # 0 = unlimited
+  cleanup_containers: true       # remove runner-created containers after each run
+  stop_grace_period_sec: 10      # grace period before Docker force kill on stop
+  orphan_recovery_on_startup: true # remove stale runner-created containers on startup
 ```
 
 ### Key fields
@@ -188,8 +191,17 @@ executor:
 | `executor.read_only_rootfs` | When `true`, job containers run with a read-only root filesystem |
 | `executor.memory_limit_mb` | Optional memory cap for job containers (`0` disables the limit) |
 | `executor.cpu_limit` | Optional CPU cap for job containers (`0` disables the limit) |
+| `executor.cleanup_containers` | Removes runner-created containers after success, failure, timeout, or cancel |
+| `executor.stop_grace_period_sec` | Docker stop grace period used before force-killing containers during timeout/cancel/recovery |
+| `executor.orphan_recovery_on_startup` | Scans Docker for runner-managed containers and removes them before scheduling starts |
 
 Built-in authentication is not provided. If the service is reachable on a non-loopback address, protect it with a reverse proxy, VPN, or IP allowlist before using it outside a trusted environment.
+
+The Docker executor uses deterministic container names: `job-runner-run-<jobID>-<runID>`. Every runner-created container is labeled with `go-job-runner.managed=true`, `go-job-runner=true`, `go-job-runner.job-id=<jobID>`, and `go-job-runner.run-id=<runID>`. Before each run, the executor removes any existing container with the same deterministic name so a stale name cannot block retry or recovery.
+
+When `executor.cleanup_containers=true`, containers are removed after success and failure. Timeout, API cancel, and process shutdown cancellation first send `docker stop -t <stop_grace_period_sec>` and then attempt container removal. If cleanup fails after the container process exits, the run fails with the Docker cleanup error so the leak is visible in run state and logs. If cleanup fails during timeout/cancel handling, timeout/cancel remains the run outcome and the labeled container can be found by startup recovery.
+
+When `executor.orphan_recovery_on_startup=true`, scheduler startup scans Docker for `go-job-runner.managed=true` containers and removes them before dispatching pending work. This reconciles Docker resources left by runner crashes or failed cleanup. SQLite run status is not rewritten during this scan; run-state reconciliation remains status-driven through normal scheduler recovery, while Docker cleanup is label-driven and idempotent.
 
 The Docker executor uses the host Docker socket, so the runner can affect the local daemon. The project does not expose privileged mode or arbitrary extra volume mounts through config. Network mode and resource limits are the supported executor-level controls; anything else should be treated as out of scope for this release.
 

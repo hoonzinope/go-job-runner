@@ -15,6 +15,10 @@ type Executor interface {
 	Execute(ctx context.Context, job *model.Job, run *model.Run) (*executor.ExecutionResult, error)
 }
 
+type orphanRecoverer interface {
+	RecoverOrphans(context.Context) error
+}
+
 type noopExecutor struct{}
 
 func (noopExecutor) Execute(ctx context.Context, job *model.Job, run *model.Run) (*executor.ExecutionResult, error) {
@@ -58,6 +62,12 @@ func NewScheduler(cfg *config.Config, st *store.Store) *Scheduler {
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	if recoverer, ok := s.executor.(orphanRecoverer); ok {
+		if err := recoverer.RecoverOrphans(ctx); err != nil {
+			return err
+		}
+	}
+
 	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()

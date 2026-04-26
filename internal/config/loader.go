@@ -14,6 +14,9 @@ func LoadConfig(path string) (*Config, error) {
 	v.SetDefault("scheduler.default_timeout_sec", 3600)
 	v.SetDefault("scheduler.max_timeout_sec", 86400)
 	v.SetDefault("scheduler.allow_unlimited_timeout", false)
+	v.SetDefault("executor.cleanup_containers", true)
+	v.SetDefault("executor.stop_grace_period_sec", 10)
+	v.SetDefault("executor.orphan_recovery_on_startup", true)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
