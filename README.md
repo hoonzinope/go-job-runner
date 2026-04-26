@@ -147,6 +147,9 @@ scheduler:
   due_job_scan_interval_sec: 2   # how often to check for due jobs
   dispatch_scan_interval_sec: 1  # how often to dispatch pending runs
   max_concurrent_runs: 2         # global worker pool size
+  default_timeout_sec: 3600      # applied when timeoutSec is omitted
+  max_timeout_sec: 86400         # largest accepted per-job timeout
+  allow_unlimited_timeout: false # allow timeoutSec=0 only when explicitly true
 
 image:
   allowed_sources:               # which source types are permitted
@@ -176,6 +179,9 @@ executor:
 | `store.log_root` | Root directory for run log files |
 | `store.artifact_root` | Root directory for run result/artifact files |
 | `scheduler.max_concurrent_runs` | Maximum number of runs executing simultaneously |
+| `scheduler.default_timeout_sec` | Timeout used when a job omits `timeoutSec`; default config is 3600 seconds |
+| `scheduler.max_timeout_sec` | Maximum accepted per-job timeout; requests above this are rejected |
+| `scheduler.allow_unlimited_timeout` | Allows `timeoutSec=0` only when `true`; disabled by default because unlimited jobs can starve workers |
 | `image.pull_policy` | `always` re-pulls on every run; `if_not_present` skips if the image exists locally |
 | `image.allowed_prefixes` | Whitelist of image ref prefixes; requests outside this list are rejected |
 | `executor.network_mode` | Docker network mode for job containers; only `bridge` and `none` are accepted |
@@ -219,7 +225,7 @@ All endpoints are under `/api/v1`.
 | `timezone` | string | IANA timezone (default: `UTC`) |
 | `concurrencyPolicy` | `allow` \| `forbid` | What to do when the job is already running |
 | `retryLimit` | number | Number of retries on failure (0 = no retry) |
-| `timeoutSec` | number | Execution timeout in seconds (0 = no timeout) |
+| `timeoutSec` | number | Execution timeout in seconds; omitted uses `scheduler.default_timeout_sec`; `0` is rejected unless `scheduler.allow_unlimited_timeout=true`; values above `scheduler.max_timeout_sec` are rejected |
 | `params` | object | Arbitrary JSON passed to the container as environment variables |
 
 ### Runs

@@ -15,6 +15,9 @@ scheduler:
   due_job_scan_interval_sec: 2
   dispatch_scan_interval_sec: 1
   max_concurrent_runs: 2
+  default_timeout_sec: 3600
+  max_timeout_sec: 86400
+  allow_unlimited_timeout: false
 
 image:
   allowed_sources:

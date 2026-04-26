@@ -19,27 +19,29 @@ import (
 )
 
 type APIServer struct {
-	Host          string
-	Port          int
-	Store         *store.Store
-	Scheduler     *scheduler.Scheduler
-	ImageResolver *image.Resolver
+	Host            string
+	Port            int
+	Store           *store.Store
+	Scheduler       *scheduler.Scheduler
+	ImageResolver   *image.Resolver
+	SchedulerConfig config.SchedulerConfig
 }
 
 func NewAPIServer(cfg *config.Config, st *store.Store, sch *scheduler.Scheduler) *APIServer {
 	return &APIServer{
-		Host:          cfg.Server.Host,
-		Port:          cfg.Server.Port,
-		Store:         st,
-		Scheduler:     sch,
-		ImageResolver: image.NewResolver(cfg.Image),
+		Host:            cfg.Server.Host,
+		Port:            cfg.Server.Port,
+		Store:           st,
+		Scheduler:       sch,
+		ImageResolver:   image.NewResolver(cfg.Image),
+		SchedulerConfig: cfg.Scheduler,
 	}
 }
 
 func (s *APIServer) setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/health", handler.HealthzHandler)
-	jobService := service.NewJobService(s.Store, s.Scheduler)
+	jobService := service.NewJobServiceWithConfig(s.Store, s.Scheduler, s.SchedulerConfig)
 	runService := service.NewRunService(s.Store)
 	ui := webui.New(jobService, runService, s.ImageResolver, logwriter.NewReader())
 	ui.RegisterRoutes(router)

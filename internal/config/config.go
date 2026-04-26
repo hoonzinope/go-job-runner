@@ -14,9 +14,12 @@ type StoreConfig struct {
 }
 
 type SchedulerConfig struct {
-	DueJobScanIntervalSec   int `yaml:"due_job_scan_interval_sec" mapstructure:"due_job_scan_interval_sec"`
-	DispatchScanIntervalSec int `yaml:"dispatch_scan_interval_sec" mapstructure:"dispatch_scan_interval_sec"`
-	MaxConcurrentRuns       int `yaml:"max_concurrent_runs" mapstructure:"max_concurrent_runs"`
+	DueJobScanIntervalSec   int  `yaml:"due_job_scan_interval_sec" mapstructure:"due_job_scan_interval_sec"`
+	DispatchScanIntervalSec int  `yaml:"dispatch_scan_interval_sec" mapstructure:"dispatch_scan_interval_sec"`
+	MaxConcurrentRuns       int  `yaml:"max_concurrent_runs" mapstructure:"max_concurrent_runs"`
+	DefaultTimeoutSec       int  `yaml:"default_timeout_sec" mapstructure:"default_timeout_sec"`
+	MaxTimeoutSec           int  `yaml:"max_timeout_sec" mapstructure:"max_timeout_sec"`
+	AllowUnlimitedTimeout   bool `yaml:"allow_unlimited_timeout" mapstructure:"allow_unlimited_timeout"`
 }
 
 type ImageRemoteConfig struct {

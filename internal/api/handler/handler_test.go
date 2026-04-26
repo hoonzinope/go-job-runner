@@ -97,7 +97,7 @@ func TestHandlerHelpers(t *testing.T) {
 			Params:            json.RawMessage(`{"foo":"bar"}`),
 			ConcurrencyPolicy: model.ConcurrencyPolicyForbid,
 			RetryLimit:        2,
-			TimeoutSec:        30,
+			TimeoutSec:        intPtr(30),
 			Timezone:          "UTC",
 		}
 		input, err := jobInputFromRequest(req)

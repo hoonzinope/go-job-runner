@@ -7,6 +7,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/model"
 	"github.com/hoonzinope/go-job-runner/internal/store"
 )
@@ -29,7 +30,7 @@ type JobInput struct {
 	ParamsJSON        *string
 	ConcurrencyPolicy model.ConcurrencyPolicy
 	RetryLimit        int
-	TimeoutSec        int
+	TimeoutSec        *int
 	Timezone          string
 }
 
@@ -54,13 +55,42 @@ func (e *ValidationError) Error() string {
 type JobService struct {
 	store     *store.Store
 	scheduler SchedulerNotifier
+	timeouts  TimeoutPolicy
 	now       func() time.Time
 }
 
+type TimeoutPolicy struct {
+	DefaultTimeoutSec     int
+	MaxTimeoutSec         int
+	AllowUnlimitedTimeout bool
+}
+
 func NewJobService(st *store.Store, scheduler SchedulerNotifier) *JobService {
+	return NewJobServiceWithTimeoutPolicy(st, scheduler, TimeoutPolicy{
+		DefaultTimeoutSec: 3600,
+		MaxTimeoutSec:     86400,
+	})
+}
+
+func NewJobServiceWithConfig(st *store.Store, scheduler SchedulerNotifier, cfg config.SchedulerConfig) *JobService {
+	return NewJobServiceWithTimeoutPolicy(st, scheduler, TimeoutPolicy{
+		DefaultTimeoutSec:     cfg.DefaultTimeoutSec,
+		MaxTimeoutSec:         cfg.MaxTimeoutSec,
+		AllowUnlimitedTimeout: cfg.AllowUnlimitedTimeout,
+	})
+}
+
+func NewJobServiceWithTimeoutPolicy(st *store.Store, scheduler SchedulerNotifier, policy TimeoutPolicy) *JobService {
+	if policy.MaxTimeoutSec <= 0 {
+		policy.MaxTimeoutSec = 86400
+	}
+	if policy.DefaultTimeoutSec == 0 && !policy.AllowUnlimitedTimeout {
+		policy.DefaultTimeoutSec = 3600
+	}
 	return &JobService{
 		store:     st,
 		scheduler: scheduler,
+		timeouts:  policy,
 		now:       time.Now,
 	}
 }
@@ -195,6 +225,10 @@ func (s *JobService) buildJob(input JobInput) (*model.Job, error) {
 	if input.Timezone == "" {
 		input.Timezone = "UTC"
 	}
+	timeoutSec, err := s.resolveTimeoutSec(input.TimeoutSec)
+	if err != nil {
+		return nil, err
+	}
 	switch input.ScheduleType {
 	case model.ScheduleTypeInterval:
 		if input.IntervalSec == nil || *input.IntervalSec <= 0 {
@@ -224,10 +258,30 @@ func (s *JobService) buildJob(input JobInput) (*model.Job, error) {
 		Timezone:          input.Timezone,
 		ConcurrencyPolicy: input.ConcurrencyPolicy,
 		RetryLimit:        input.RetryLimit,
-		TimeoutSec:        input.TimeoutSec,
+		TimeoutSec:        timeoutSec,
 		ParamsJSON:        input.ParamsJSON,
 	}
 	return job, nil
+}
+
+func (s *JobService) resolveTimeoutSec(requested *int) (int, error) {
+	if requested == nil {
+		return s.timeouts.DefaultTimeoutSec, nil
+	}
+	timeoutSec := *requested
+	if timeoutSec < 0 {
+		return 0, &ValidationError{Field: "timeoutSec", Message: "must be greater than or equal to 0"}
+	}
+	if timeoutSec == 0 {
+		if s.timeouts.AllowUnlimitedTimeout {
+			return 0, nil
+		}
+		return 0, &ValidationError{Field: "timeoutSec", Message: "unlimited timeout is disabled"}
+	}
+	if timeoutSec > s.timeouts.MaxTimeoutSec {
+		return 0, &ValidationError{Field: "timeoutSec", Message: fmt.Sprintf("must be less than or equal to %d", s.timeouts.MaxTimeoutSec)}
+	}
+	return timeoutSec, nil
 }
 
 func computeNextRunAt(job *model.Job, from time.Time) (*time.Time, error) {

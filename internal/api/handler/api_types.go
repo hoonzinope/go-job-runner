@@ -27,7 +27,7 @@ type jobRequest struct {
 	Params            json.RawMessage         `json:"params"`
 	ConcurrencyPolicy model.ConcurrencyPolicy `json:"concurrencyPolicy"`
 	RetryLimit        int                     `json:"retryLimit"`
-	TimeoutSec        int                     `json:"timeoutSec"`
+	TimeoutSec        *int                    `json:"timeoutSec"`
 	Timezone          string                  `json:"timezone"`
 }
 

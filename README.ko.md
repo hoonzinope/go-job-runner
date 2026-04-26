@@ -147,6 +147,9 @@ scheduler:
   due_job_scan_interval_sec: 2   # 실행 예정 잡을 확인하는 주기
   dispatch_scan_interval_sec: 1  # 대기 중인 실행을 디스패치하는 주기
   max_concurrent_runs: 2         # 전역 워커 풀 크기
+  default_timeout_sec: 3600      # timeoutSec가 생략되면 적용
+  max_timeout_sec: 86400         # 잡별 최대 허용 타임아웃
+  allow_unlimited_timeout: false # true일 때만 timeoutSec=0 허용
 
 image:
   allowed_sources:               # 허용되는 소스 타입
@@ -176,6 +179,9 @@ executor:
 | `store.log_root` | 실행 로그 파일의 루트 디렉터리 |
 | `store.artifact_root` | 실행 결과/아티팩트 파일의 루트 디렉터리 |
 | `scheduler.max_concurrent_runs` | 동시에 실행 가능한 최대 실행 수 |
+| `scheduler.default_timeout_sec` | 잡이 `timeoutSec`를 생략했을 때 적용되는 타임아웃; 기본 예시는 3600초 |
+| `scheduler.max_timeout_sec` | 잡별 최대 허용 타임아웃; 초과 요청은 거부됨 |
+| `scheduler.allow_unlimited_timeout` | `true`일 때만 `timeoutSec=0` 허용; 무제한 실행은 워커 고갈 위험이 있어 기본 비활성화 |
 | `image.pull_policy` | `always`는 매 실행마다 재풀; `if_not_present`는 이미지가 있으면 생략 |
 | `image.allowed_prefixes` | 이미지 ref 접두사 허용 목록; 목록 외의 요청은 거부됨 |
 | `executor.network_mode` | 잡 컨테이너의 Docker 네트워크 모드; `bridge`와 `none`만 허용 |
@@ -219,7 +225,7 @@ Docker 실행기는 호스트 Docker 소켓을 사용하므로, 러너는 로컬
 | `timezone` | string | IANA 타임존 (기본값: `UTC`) |
 | `concurrencyPolicy` | `allow` \| `forbid` | 잡이 이미 실행 중일 때의 동작 |
 | `retryLimit` | number | 실패 시 재시도 횟수 (0 = 재시도 없음) |
-| `timeoutSec` | number | 실행 타임아웃 초 단위 (0 = 타임아웃 없음) |
+| `timeoutSec` | number | 실행 타임아웃 초 단위; 생략하면 `scheduler.default_timeout_sec` 사용; `0`은 `scheduler.allow_unlimited_timeout=true`일 때만 허용; `scheduler.max_timeout_sec` 초과 값은 거부 |
 | `params` | object | 컨테이너에 환경 변수로 전달되는 임의 JSON |
 
 ### Runs

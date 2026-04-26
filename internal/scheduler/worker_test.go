@@ -89,6 +89,46 @@ func TestRunWorkerDoesNotScheduleRetryWhenLimitIsZero(t *testing.T) {
 	}
 }
 
+func TestEffectiveTimeoutSec(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		s    Scheduler
+		in   int
+		want int
+	}{
+		{
+			name: "legacy zero uses default",
+			s:    Scheduler{defaultTimeoutSec: 120, maxTimeoutSec: 300},
+			in:   0,
+			want: 120,
+		},
+		{
+			name: "zero remains unlimited when explicitly allowed",
+			s:    Scheduler{defaultTimeoutSec: 120, maxTimeoutSec: 300, allowUnlimited: true},
+			in:   0,
+			want: 0,
+		},
+		{
+			name: "above max clamps at execution",
+			s:    Scheduler{defaultTimeoutSec: 120, maxTimeoutSec: 300},
+			in:   301,
+			want: 300,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tt.s.effectiveTimeoutSec(tt.in); got != tt.want {
+				t.Fatalf("effectiveTimeoutSec(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")

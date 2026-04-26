@@ -696,7 +696,7 @@ func jobInputFromForm(c *gin.Context) (service.JobInput, *model.Job, error) {
 			ImageRef:          strings.TrimSpace(c.PostForm("imageRef")),
 			ScheduleType:      model.ScheduleType(strings.TrimSpace(c.PostForm("scheduleType"))),
 			RetryLimit:        parseIntFormDefault(c.PostForm("retryLimit"), 0),
-			TimeoutSec:        parseIntFormDefault(c.PostForm("timeoutSec"), 0),
+			TimeoutSec:        parseIntFormPtr(c.PostForm("timeoutSec")),
 			Description:       stringPtrOrNil(strings.TrimSpace(c.PostForm("description"))),
 			Enabled:           enabled != nil && *enabled,
 			ParamsJSON:        paramsJSON,
@@ -714,7 +714,9 @@ func jobInputFromForm(c *gin.Context) (service.JobInput, *model.Job, error) {
 	draft.Timezone = jobInput.Timezone
 	draft.ConcurrencyPolicy = jobInput.ConcurrencyPolicy
 	draft.RetryLimit = jobInput.RetryLimit
-	draft.TimeoutSec = jobInput.TimeoutSec
+	if jobInput.TimeoutSec != nil {
+		draft.TimeoutSec = *jobInput.TimeoutSec
+	}
 	draft.ParamsJSON = paramsJSON
 
 	if interval := strings.TrimSpace(c.PostForm("intervalSec")); interval != "" {
@@ -746,6 +748,18 @@ func parseIntFormDefault(value string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func parseIntFormPtr(value string) *int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		n = 0
+	}
+	return &n
 }
 
 func stringPtrOrNil(value string) *string {

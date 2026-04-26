@@ -29,6 +29,9 @@ type Scheduler struct {
 	dueJobInterval    time.Duration
 	dispatchInterval  time.Duration
 	maxConcurrentRuns int
+	defaultTimeoutSec int
+	maxTimeoutSec     int
+	allowUnlimited    bool
 
 	dueWakeup      chan struct{}
 	dispatchWakeup chan struct{}
@@ -44,6 +47,9 @@ func NewScheduler(cfg *config.Config, st *store.Store) *Scheduler {
 		dueJobInterval:    time.Duration(cfg.Scheduler.DueJobScanIntervalSec) * time.Second,
 		dispatchInterval:  time.Duration(cfg.Scheduler.DispatchScanIntervalSec) * time.Second,
 		maxConcurrentRuns: cfg.Scheduler.MaxConcurrentRuns,
+		defaultTimeoutSec: cfg.Scheduler.DefaultTimeoutSec,
+		maxTimeoutSec:     cfg.Scheduler.MaxTimeoutSec,
+		allowUnlimited:    cfg.Scheduler.AllowUnlimitedTimeout,
 		dueWakeup:         make(chan struct{}, 1),
 		dispatchWakeup:    make(chan struct{}, 1),
 		workerTokens:      make(chan struct{}, cfg.Scheduler.MaxConcurrentRuns),

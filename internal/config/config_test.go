@@ -26,6 +26,9 @@ scheduler:
   due_job_scan_interval_sec: 2
   dispatch_scan_interval_sec: 1
   max_concurrent_runs: 3
+  default_timeout_sec: 3600
+  max_timeout_sec: 86400
+  allow_unlimited_timeout: false
 
 image:
   allowed_sources:
@@ -57,7 +60,7 @@ executor:
 	if cfg.Store.SQLitePath != "/data/app.db" || cfg.Store.LogRoot != "/data/logs" || cfg.Store.ArtifactRoot != "/data/artifacts" {
 		t.Fatalf("unexpected store config: %+v", cfg.Store)
 	}
-	if cfg.Scheduler.DueJobScanIntervalSec != 2 || cfg.Scheduler.DispatchScanIntervalSec != 1 || cfg.Scheduler.MaxConcurrentRuns != 3 {
+	if cfg.Scheduler.DueJobScanIntervalSec != 2 || cfg.Scheduler.DispatchScanIntervalSec != 1 || cfg.Scheduler.MaxConcurrentRuns != 3 || cfg.Scheduler.DefaultTimeoutSec != 3600 || cfg.Scheduler.MaxTimeoutSec != 86400 || cfg.Scheduler.AllowUnlimitedTimeout {
 		t.Fatalf("unexpected scheduler config: %+v", cfg.Scheduler)
 	}
 	if len(cfg.Image.AllowedSources) != 2 || cfg.Image.DefaultSource != "local" || cfg.Image.PullPolicy != "if_not_present" {
@@ -145,6 +148,35 @@ func TestConfigValidate(t *testing.T) {
 				c.Scheduler.MaxConcurrentRuns = 0
 			},
 			wantErr: "scheduler max_concurrent_runs must be > 0",
+		},
+		{
+			name: "negative default timeout",
+			mutate: func(c *Config) {
+				c.Scheduler.DefaultTimeoutSec = -1
+			},
+			wantErr: "scheduler default_timeout_sec must be >= 0",
+		},
+		{
+			name: "zero default timeout requires unlimited opt in",
+			mutate: func(c *Config) {
+				c.Scheduler.DefaultTimeoutSec = 0
+			},
+			wantErr: "scheduler default_timeout_sec must be > 0 unless allow_unlimited_timeout is true",
+		},
+		{
+			name: "missing max timeout",
+			mutate: func(c *Config) {
+				c.Scheduler.MaxTimeoutSec = 0
+			},
+			wantErr: "scheduler max_timeout_sec must be > 0",
+		},
+		{
+			name: "default timeout above max",
+			mutate: func(c *Config) {
+				c.Scheduler.DefaultTimeoutSec = 100
+				c.Scheduler.MaxTimeoutSec = 99
+			},
+			wantErr: "scheduler default_timeout_sec must be <= max_timeout_sec",
 		},
 		{
 			name: "missing allowed sources",
@@ -300,6 +332,8 @@ func validConfig() Config {
 			DueJobScanIntervalSec:   2,
 			DispatchScanIntervalSec: 1,
 			MaxConcurrentRuns:       3,
+			DefaultTimeoutSec:       3600,
+			MaxTimeoutSec:           86400,
 		},
 		Image: ImageConfig{
 			AllowedSources:  []string{"local", "remote"},

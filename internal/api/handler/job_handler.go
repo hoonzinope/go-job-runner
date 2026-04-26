@@ -86,6 +86,11 @@ func (h *JobHandler) CreateJob(c *gin.Context) {
 
 	created, err := h.service.CreateJob(c.Request.Context(), input)
 	if err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			badRequest(c, validationErr)
+			return
+		}
 		internalError(c, err)
 		return
 	}
@@ -114,6 +119,11 @@ func (h *JobHandler) UpdateJob(c *gin.Context) {
 
 	updated, err := h.service.UpdateJob(c.Request.Context(), jobID, input)
 	if err != nil {
+		var validationErr *service.ValidationError
+		if errors.As(err, &validationErr) {
+			badRequest(c, validationErr)
+			return
+		}
 		internalError(c, err)
 		return
 	}

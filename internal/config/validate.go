@@ -39,6 +39,18 @@ func (c *Config) Validate() error {
 		log.Printf("Scheduler max_concurrent_runs must be > 0")
 		return fmt.Errorf("scheduler max_concurrent_runs must be > 0")
 	}
+	if c.Scheduler.DefaultTimeoutSec < 0 {
+		return fmt.Errorf("scheduler default_timeout_sec must be >= 0")
+	}
+	if c.Scheduler.DefaultTimeoutSec == 0 && !c.Scheduler.AllowUnlimitedTimeout {
+		return fmt.Errorf("scheduler default_timeout_sec must be > 0 unless allow_unlimited_timeout is true")
+	}
+	if c.Scheduler.MaxTimeoutSec <= 0 {
+		return fmt.Errorf("scheduler max_timeout_sec must be > 0")
+	}
+	if c.Scheduler.DefaultTimeoutSec > c.Scheduler.MaxTimeoutSec {
+		return fmt.Errorf("scheduler default_timeout_sec must be <= max_timeout_sec")
+	}
 	if len(c.Image.AllowedSources) == 0 {
 		log.Printf("Image allowed_sources is required")
 		return fmt.Errorf("image allowed_sources is required")

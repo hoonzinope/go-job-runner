@@ -144,7 +144,7 @@ func TestJobServiceCreateJob(t *testing.T) {
 		ParamsJSON:        &params,
 		ConcurrencyPolicy: model.ConcurrencyPolicyForbid,
 		RetryLimit:        2,
-		TimeoutSec:        30,
+		TimeoutSec:        ptrInt(30),
 	}
 
 	created, err := svc.CreateJob(context.Background(), input)
@@ -229,6 +229,96 @@ func TestJobServiceCreateJobValidationErrors(t *testing.T) {
 	}
 }
 
+func TestJobServiceTimeoutPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		policy    TimeoutPolicy
+		timeout   *int
+		want      int
+		wantField string
+	}{
+		{
+			name: "omitted timeout uses default",
+			policy: TimeoutPolicy{
+				DefaultTimeoutSec: 120,
+				MaxTimeoutSec:     300,
+			},
+			want: 120,
+		},
+		{
+			name: "zero timeout rejected by default",
+			policy: TimeoutPolicy{
+				DefaultTimeoutSec: 120,
+				MaxTimeoutSec:     300,
+			},
+			timeout:   ptrInt(0),
+			wantField: "timeoutSec",
+		},
+		{
+			name: "zero timeout allowed when enabled",
+			policy: TimeoutPolicy{
+				DefaultTimeoutSec:     120,
+				MaxTimeoutSec:         300,
+				AllowUnlimitedTimeout: true,
+			},
+			timeout: ptrInt(0),
+			want:    0,
+		},
+		{
+			name: "timeout above max rejected",
+			policy: TimeoutPolicy{
+				DefaultTimeoutSec: 120,
+				MaxTimeoutSec:     300,
+			},
+			timeout:   ptrInt(301),
+			wantField: "timeoutSec",
+		},
+		{
+			name: "negative timeout rejected",
+			policy: TimeoutPolicy{
+				DefaultTimeoutSec: 120,
+				MaxTimeoutSec:     300,
+			},
+			timeout:   ptrInt(-1),
+			wantField: "timeoutSec",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			st := openServiceTestStore(t)
+			svc := NewJobServiceWithTimeoutPolicy(st, nil, tt.policy)
+			input := validIntervalJobInput()
+			input.TimeoutSec = tt.timeout
+
+			created, err := svc.CreateJob(context.Background(), input)
+			if tt.wantField != "" {
+				if err == nil {
+					t.Fatal("expected validation error")
+				}
+				var vErr *ValidationError
+				if !errors.As(err, &vErr) {
+					t.Fatalf("expected ValidationError, got %T %v", err, err)
+				}
+				if vErr.Field != tt.wantField {
+					t.Fatalf("unexpected validation field: got %q want %q", vErr.Field, tt.wantField)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create job: %v", err)
+			}
+			if created.TimeoutSec != tt.want {
+				t.Fatalf("unexpected timeout: got %d want %d", created.TimeoutSec, tt.want)
+			}
+		})
+	}
+}
+
 func TestJobServiceUpdateJobPreservesExistingFields(t *testing.T) {
 	t.Parallel()
 
@@ -262,7 +352,7 @@ func TestJobServiceUpdateJobPreservesExistingFields(t *testing.T) {
 		IntervalSec:       ptrInt(120),
 		ConcurrencyPolicy: model.ConcurrencyPolicyAllow,
 		RetryLimit:        3,
-		TimeoutSec:        45,
+		TimeoutSec:        ptrInt(45),
 	})
 	if err != nil {
 		t.Fatalf("update job: %v", err)
@@ -425,7 +515,7 @@ func validIntervalJobInput() JobInput {
 		IntervalSec:       ptrInt(60),
 		ConcurrencyPolicy: model.ConcurrencyPolicyForbid,
 		RetryLimit:        1,
-		TimeoutSec:        30,
+		TimeoutSec:        ptrInt(30),
 	}
 }
 

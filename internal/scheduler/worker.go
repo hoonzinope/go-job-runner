@@ -99,6 +99,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 
 	runCtx := ctx
 	cancelRun := func() {}
+	job.TimeoutSec = s.effectiveTimeoutSec(job.TimeoutSec)
 	if job.TimeoutSec > 0 {
 		runCtx, cancelRun = context.WithTimeout(ctx, time.Duration(job.TimeoutSec)*time.Second)
 	}
@@ -205,6 +206,26 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	}
 
 	s.signalDispatch()
+}
+
+func (s *Scheduler) effectiveTimeoutSec(timeoutSec int) int {
+	maxTimeoutSec := s.maxTimeoutSec
+	if maxTimeoutSec <= 0 {
+		maxTimeoutSec = 86400
+	}
+	if timeoutSec == 0 {
+		if s.allowUnlimited {
+			return 0
+		}
+		if s.defaultTimeoutSec > 0 {
+			return s.defaultTimeoutSec
+		}
+		return 3600
+	}
+	if timeoutSec > maxTimeoutSec {
+		return maxTimeoutSec
+	}
+	return timeoutSec
 }
 
 func buildRetryRun(job *model.Job, currentRun *model.Run) (*model.Run, *model.RunEvent, bool) {
