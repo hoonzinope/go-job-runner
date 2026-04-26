@@ -22,6 +22,7 @@ Schedule Docker image workloads on cron or interval schedules. Tracks run histor
 
 - [Features](#features)
 - [Architecture](#architecture)
+- [Current Limitations / Non-goals](#current-limitations--non-goals)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
@@ -83,6 +84,20 @@ Schedule Docker image workloads on cron or interval schedules. Tracks run histor
 | Due-job loop | Scans `next_run_at`, inserts `pending` runs |
 | Dispatch loop | Picks up `pending` runs, hands them to workers |
 | Worker goroutine | Resolves image → pulls → runs container → writes logs → updates status |
+
+---
+
+## Current Limitations / Non-goals
+
+job-runner is intentionally scoped as a lightweight, self-contained Docker workload scheduler. It does not currently guarantee production-grade orchestration behavior.
+
+- The runner assumes a single-node deployment. Distributed workers, multi-node coordination, Kubernetes, and Docker Swarm are out of scope.
+- Scheduling is best-effort. Jobs are checked and dispatched by periodic scheduler loops, so strict real-time execution is not guaranteed.
+- Built-in authentication and authorization are not provided for the Web UI or REST API.
+- External exposure should be protected by reverse proxy authentication, a VPN, or an IP allowlist.
+- Docker socket access is required. Because that socket can affect the host Docker daemon, run the service only in trusted environments.
+- Retention pruning exists for completed run history, logs, and artifacts, but long-term storage management policy should still be planned by the operator.
+- High availability, failover, and cross-node recovery are not current goals.
 
 ---
 
