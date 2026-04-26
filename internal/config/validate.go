@@ -106,6 +106,27 @@ func (c *Config) Validate() error {
 	if c.Executor.StopGracePeriodSec < 0 {
 		return fmt.Errorf("executor stop_grace_period_sec must be >= 0")
 	}
+	if c.Retention.PruneIntervalSec <= 0 {
+		return fmt.Errorf("retention prune_interval_sec must be > 0")
+	}
+	if c.Retention.RunHistoryDays < 0 {
+		return fmt.Errorf("retention run_history_days must be >= 0")
+	}
+	if c.Retention.SuccessLogDays < 0 {
+		return fmt.Errorf("retention success_log_days must be >= 0")
+	}
+	if c.Retention.FailedLogDays < 0 {
+		return fmt.Errorf("retention failed_log_days must be >= 0")
+	}
+	if c.Retention.ArtifactDays < 0 {
+		return fmt.Errorf("retention artifact_days must be >= 0")
+	}
+	if c.Retention.MaxLogBytesPerRun < 0 {
+		return fmt.Errorf("retention max_log_bytes_per_run must be >= 0")
+	}
+	if c.Retention.MaxTotalStorageBytes < 0 {
+		return fmt.Errorf("retention max_total_storage_bytes must be >= 0")
+	}
 	return nil
 }
 

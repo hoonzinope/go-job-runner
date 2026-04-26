@@ -172,6 +172,16 @@ executor:
   cleanup_containers: true       # remove runner-created containers after each run
   stop_grace_period_sec: 10      # grace period before Docker force kill on stop
   orphan_recovery_on_startup: true # remove stale runner-created containers on startup
+
+retention:
+  enabled: true
+  prune_interval_sec: 3600       # how often to run cleanup
+  run_history_days: 30           # delete completed runs and their events after this age
+  success_log_days: 7            # delete successful run logs after this age
+  failed_log_days: 30            # delete failed/timeout/cancelled logs after this age
+  artifact_days: 14              # delete result/artifact files after this age
+  max_log_bytes_per_run: 10485760 # truncate completed run logs above 10 MiB
+  max_total_storage_bytes: 10737418240 # delete oldest completed-run files above 10 GiB
 ```
 
 ### Key fields
@@ -194,6 +204,13 @@ executor:
 | `executor.cleanup_containers` | Removes runner-created containers after success, failure, timeout, or cancel |
 | `executor.stop_grace_period_sec` | Docker stop grace period used before force-killing containers during timeout/cancel/recovery |
 | `executor.orphan_recovery_on_startup` | Scans Docker for runner-managed containers and removes them before scheduling starts |
+| `retention.enabled` | Enables scheduled pruning on startup and every `prune_interval_sec` seconds |
+| `retention.run_history_days` | Deletes completed run rows older than this many days; run events are deleted by SQLite cascade |
+| `retention.success_log_days` | Deletes log files for successful completed runs older than this many days |
+| `retention.failed_log_days` | Deletes log files for failed, timed out, and cancelled completed runs older than this many days |
+| `retention.artifact_days` | Deletes result/artifact files for completed runs older than this many days |
+| `retention.max_log_bytes_per_run` | Truncates oversized log files for completed runs; `0` disables the limit |
+| `retention.max_total_storage_bytes` | Deletes oldest completed-run log/artifact files until managed storage is below the cap; `0` disables the cap |
 
 Built-in authentication is not provided. If the service is reachable on a non-loopback address, protect it with a reverse proxy, VPN, or IP allowlist before using it outside a trusted environment.
 
@@ -204,6 +221,8 @@ When `executor.cleanup_containers=true`, containers are removed after success an
 When `executor.orphan_recovery_on_startup=true`, scheduler startup scans Docker for `go-job-runner.managed=true` containers and removes them before dispatching pending work. This reconciles Docker resources left by runner crashes or failed cleanup. SQLite run status is not rewritten during this scan; run-state reconciliation remains status-driven through normal scheduler recovery, while Docker cleanup is label-driven and idempotent.
 
 The Docker executor uses the host Docker socket, so the runner can affect the local daemon. The project does not expose privileged mode or arbitrary extra volume mounts through config. Network mode and resource limits are the supported executor-level controls; anything else should be treated as out of scope for this release.
+
+Retention pruning only targets completed runs (`success`, `failed`, `timeout`, `cancelled`). It does not delete `pending`, `running`, or `cancelling` run rows, events, logs, or artifacts. File pruning is constrained to paths under `store.log_root` and `store.artifact_root`, so paths outside managed storage are ignored.
 
 ---
 

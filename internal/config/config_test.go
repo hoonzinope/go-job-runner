@@ -50,6 +50,16 @@ executor:
   cleanup_containers: true
   stop_grace_period_sec: 10
   orphan_recovery_on_startup: true
+
+retention:
+  enabled: true
+  prune_interval_sec: 600
+  run_history_days: 30
+  success_log_days: 7
+  failed_log_days: 30
+  artifact_days: 14
+  max_log_bytes_per_run: 10485760
+  max_total_storage_bytes: 10737418240
 `)
 
 	cfg, err := LoadConfig(dir)
@@ -74,6 +84,9 @@ executor:
 	}
 	if cfg.Executor.NetworkMode != "bridge" || !cfg.Executor.ReadOnlyRootFS || cfg.Executor.MemoryLimitMB != 512 || cfg.Executor.CPULimit != 1.5 || !cfg.Executor.CleanupContainers || cfg.Executor.StopGracePeriodSec != 10 || !cfg.Executor.OrphanRecoveryOnStartup {
 		t.Fatalf("unexpected executor config: %+v", cfg.Executor)
+	}
+	if !cfg.Retention.Enabled || cfg.Retention.PruneIntervalSec != 600 || cfg.Retention.RunHistoryDays != 30 || cfg.Retention.SuccessLogDays != 7 || cfg.Retention.FailedLogDays != 30 || cfg.Retention.ArtifactDays != 14 || cfg.Retention.MaxLogBytesPerRun != 10485760 || cfg.Retention.MaxTotalStorageBytes != 10737418240 {
+		t.Fatalf("unexpected retention config: %+v", cfg.Retention)
 	}
 }
 
@@ -268,6 +281,27 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: "executor stop_grace_period_sec must be >= 0",
 		},
+		{
+			name: "missing retention prune interval",
+			mutate: func(c *Config) {
+				c.Retention.PruneIntervalSec = 0
+			},
+			wantErr: "retention prune_interval_sec must be > 0",
+		},
+		{
+			name: "negative retention run history days",
+			mutate: func(c *Config) {
+				c.Retention.RunHistoryDays = -1
+			},
+			wantErr: "retention run_history_days must be >= 0",
+		},
+		{
+			name: "negative retention max log bytes",
+			mutate: func(c *Config) {
+				c.Retention.MaxLogBytesPerRun = -1
+			},
+			wantErr: "retention max_log_bytes_per_run must be >= 0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -363,6 +397,16 @@ func validConfig() Config {
 			CleanupContainers:       true,
 			StopGracePeriodSec:      10,
 			OrphanRecoveryOnStartup: true,
+		},
+		Retention: RetentionConfig{
+			Enabled:              true,
+			PruneIntervalSec:     3600,
+			RunHistoryDays:       30,
+			SuccessLogDays:       7,
+			FailedLogDays:        30,
+			ArtifactDays:         14,
+			MaxLogBytesPerRun:    10485760,
+			MaxTotalStorageBytes: 10737418240,
 		},
 	}
 }

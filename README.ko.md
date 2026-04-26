@@ -172,6 +172,16 @@ executor:
   cleanup_containers: true       # 각 실행 후 러너 생성 컨테이너 제거
   stop_grace_period_sec: 10      # stop 후 force kill 전 대기 시간
   orphan_recovery_on_startup: true # 시작 시 남은 러너 컨테이너 제거
+
+retention:
+  enabled: true
+  prune_interval_sec: 3600       # 정리 작업 실행 주기
+  run_history_days: 30           # 완료된 run과 이벤트를 이 기간 후 삭제
+  success_log_days: 7            # 성공 run 로그를 이 기간 후 삭제
+  failed_log_days: 30            # 실패/타임아웃/취소 로그를 이 기간 후 삭제
+  artifact_days: 14              # 결과/아티팩트 파일을 이 기간 후 삭제
+  max_log_bytes_per_run: 10485760 # 완료된 run 로그를 10 MiB로 제한
+  max_total_storage_bytes: 10737418240 # 10 GiB 초과 시 오래된 완료-run 파일 삭제
 ```
 
 ### 주요 필드
@@ -194,6 +204,13 @@ executor:
 | `executor.cleanup_containers` | 성공, 실패, 타임아웃, 취소 후 러너가 생성한 컨테이너를 제거 |
 | `executor.stop_grace_period_sec` | 타임아웃/취소/복구 중 컨테이너를 force kill하기 전 Docker stop 대기 시간 |
 | `executor.orphan_recovery_on_startup` | 스케줄링 시작 전 러너 관리 컨테이너를 스캔해 제거 |
+| `retention.enabled` | 시작 시와 `prune_interval_sec` 주기로 pruning 활성화 |
+| `retention.run_history_days` | 지정 일수보다 오래된 완료 run row 삭제; run event는 SQLite cascade로 함께 삭제 |
+| `retention.success_log_days` | 지정 일수보다 오래된 성공 run 로그 파일 삭제 |
+| `retention.failed_log_days` | 지정 일수보다 오래된 실패, 타임아웃, 취소 run 로그 파일 삭제 |
+| `retention.artifact_days` | 지정 일수보다 오래된 완료 run 결과/아티팩트 파일 삭제 |
+| `retention.max_log_bytes_per_run` | 완료 run의 과도한 로그 파일을 잘라냄; `0`이면 비활성화 |
+| `retention.max_total_storage_bytes` | 관리 스토리지가 상한 이하가 될 때까지 가장 오래된 완료-run 로그/아티팩트 삭제; `0`이면 비활성화 |
 
 내장 인증은 제공되지 않습니다. 서비스가 non-loopback 주소에서 접근 가능하다면, 신뢰할 수 있는 환경 밖에서 사용하기 전에 reverse proxy, VPN, 또는 IP allowlist로 보호하세요.
 
@@ -204,6 +221,8 @@ Docker 실행기는 결정적 컨테이너 이름 `job-runner-run-<jobID>-<runID
 `executor.orphan_recovery_on_startup=true`이면 스케줄러 시작 시 Docker에서 `go-job-runner.managed=true` 컨테이너를 스캔해 pending work를 dispatch하기 전에 제거합니다. 이 동작은 러너 crash나 cleanup 실패로 남은 Docker 리소스를 정리합니다. 이 스캔은 SQLite run status를 직접 다시 쓰지 않습니다. run 상태 복구는 기존 스케줄러 상태 흐름을 따르고, Docker cleanup은 label 기반의 idempotent 작업으로 처리합니다.
 
 Docker 실행기는 호스트 Docker 소켓을 사용하므로, 러너는 로컬 Docker daemon에 영향을 줄 수 있습니다. 이 저장소는 privileged 모드와 임의 volume mount를 config로 노출하지 않습니다. 네트워크 모드와 리소스 제한만 실행기 수준에서 지원하며, 그 외 옵션은 현재 범위 밖으로 봐야 합니다.
+
+Retention pruning은 완료된 run(`success`, `failed`, `timeout`, `cancelled`)만 대상으로 합니다. `pending`, `running`, `cancelling` 상태의 run row, event, log, artifact는 삭제하지 않습니다. 파일 pruning은 `store.log_root`와 `store.artifact_root` 아래 경로로 제한되며, 관리 스토리지 밖의 경로는 무시합니다.
 
 ---
 

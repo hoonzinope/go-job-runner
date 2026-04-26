@@ -17,6 +17,8 @@ func LoadConfig(path string) (*Config, error) {
 	v.SetDefault("executor.cleanup_containers", true)
 	v.SetDefault("executor.stop_grace_period_sec", 10)
 	v.SetDefault("executor.orphan_recovery_on_startup", true)
+	v.SetDefault("retention.enabled", true)
+	v.SetDefault("retention.prune_interval_sec", 3600)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)

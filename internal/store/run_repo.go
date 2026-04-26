@@ -232,6 +232,66 @@ func (r *RunRepo) ListPending(ctx context.Context, limit int) ([]model.Run, erro
 	return runs, nil
 }
 
+func (r *RunRepo) ListTerminalBefore(ctx context.Context, before time.Time, page Page) ([]model.Run, int64, error) {
+	limit, offset := page.normalize()
+	args := []any{
+		string(model.RunStatusSuccess),
+		string(model.RunStatusFailed),
+		string(model.RunStatusTimeout),
+		string(model.RunStatusCancelled),
+		encodeTime(before),
+	}
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM runs
+		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+	`, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count terminal runs before cutoff: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, job_id, scheduled_at, started_at, finished_at, status, attempt,
+			exit_code, error_message, log_path, result_path, created_at, updated_at
+		FROM runs
+		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+		ORDER BY finished_at ASC, id ASC
+		LIMIT ? OFFSET ?
+	`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list terminal runs before cutoff: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []model.Run
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate terminal runs before cutoff: %w", err)
+	}
+	return runs, total, nil
+}
+
+func (r *RunRepo) DeleteTerminalBefore(ctx context.Context, before time.Time) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM runs
+		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+	`, string(model.RunStatusSuccess), string(model.RunStatusFailed), string(model.RunStatusTimeout), string(model.RunStatusCancelled), encodeTime(before))
+	if err != nil {
+		return 0, fmt.Errorf("delete terminal runs before cutoff: %w", err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("terminal runs delete affected rows: %w", err)
+	}
+	return count, nil
+}
+
 func scanRun(scanner interface{ Scan(...any) error }) (*model.Run, error) {
 	var (
 		run                                 model.Run

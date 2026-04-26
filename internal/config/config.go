@@ -45,10 +45,22 @@ type ExecutorConfig struct {
 	OrphanRecoveryOnStartup bool    `yaml:"orphan_recovery_on_startup" mapstructure:"orphan_recovery_on_startup"`
 }
 
+type RetentionConfig struct {
+	Enabled              bool  `yaml:"enabled" mapstructure:"enabled"`
+	PruneIntervalSec     int   `yaml:"prune_interval_sec" mapstructure:"prune_interval_sec"`
+	RunHistoryDays       int   `yaml:"run_history_days" mapstructure:"run_history_days"`
+	SuccessLogDays       int   `yaml:"success_log_days" mapstructure:"success_log_days"`
+	FailedLogDays        int   `yaml:"failed_log_days" mapstructure:"failed_log_days"`
+	ArtifactDays         int   `yaml:"artifact_days" mapstructure:"artifact_days"`
+	MaxLogBytesPerRun    int64 `yaml:"max_log_bytes_per_run" mapstructure:"max_log_bytes_per_run"`
+	MaxTotalStorageBytes int64 `yaml:"max_total_storage_bytes" mapstructure:"max_total_storage_bytes"`
+}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server" mapstructure:"server"`
 	Store     StoreConfig     `yaml:"store" mapstructure:"store"`
 	Scheduler SchedulerConfig `yaml:"scheduler" mapstructure:"scheduler"`
 	Image     ImageConfig     `yaml:"image" mapstructure:"image"`
 	Executor  ExecutorConfig  `yaml:"executor" mapstructure:"executor"`
+	Retention RetentionConfig `yaml:"retention" mapstructure:"retention"`
 }
