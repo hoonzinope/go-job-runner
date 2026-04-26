@@ -42,6 +42,7 @@ Schedule Docker image workloads on cron or interval schedules. Tracks run histor
 - **Web UI** — browse jobs and runs, view logs, trigger/cancel runs from the browser
 - **REST API** — full CRUD and operational endpoints under `/api/v1`
 - **Dual image sources** — pull images from a local path or a remote registry
+- **Executor policy** — Docker execution is constrained to documented network and resource settings; privileged mode and extra volume mounts are not exposed
 - **Self-contained** — single binary, single config file, no external broker or database server
 
 ---
@@ -159,6 +160,12 @@ image:
   remote:
     endpoint: http://192.168.215.1:5001
     insecure: true
+
+executor:
+  network_mode: bridge           # bridge | none; host is intentionally rejected
+  read_only_rootfs: false        # enable only after checking workloads
+  memory_limit_mb: 0             # 0 = unlimited
+  cpu_limit: 0                   # 0 = unlimited
 ```
 
 ### Key fields
@@ -171,8 +178,14 @@ image:
 | `scheduler.max_concurrent_runs` | Maximum number of runs executing simultaneously |
 | `image.pull_policy` | `always` re-pulls on every run; `if_not_present` skips if the image exists locally |
 | `image.allowed_prefixes` | Whitelist of image ref prefixes; requests outside this list are rejected |
+| `executor.network_mode` | Docker network mode for job containers; only `bridge` and `none` are accepted |
+| `executor.read_only_rootfs` | When `true`, job containers run with a read-only root filesystem |
+| `executor.memory_limit_mb` | Optional memory cap for job containers (`0` disables the limit) |
+| `executor.cpu_limit` | Optional CPU cap for job containers (`0` disables the limit) |
 
 Built-in authentication is not provided. If the service is reachable on a non-loopback address, protect it with a reverse proxy, VPN, or IP allowlist before using it outside a trusted environment.
+
+The Docker executor uses the host Docker socket, so the runner can affect the local daemon. The project does not expose privileged mode or arbitrary extra volume mounts through config. Network mode and resource limits are the supported executor-level controls; anything else should be treated as out of scope for this release.
 
 ---
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/image"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
 	"github.com/hoonzinope/go-job-runner/internal/model"
@@ -157,6 +158,53 @@ func TestExecuteHappyPath(t *testing.T) {
 	}
 	if record.ExitCode != 0 || record.Message != "success" || record.PullRef != "registry.example/jobs/example:latest" {
 		t.Fatalf("unexpected result record: %+v", record)
+	}
+}
+
+func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
+	t.Parallel()
+
+	args := dockerRunArgs(
+		"job-runner-run-41-42",
+		"registry.example/jobs/example:latest",
+		30,
+		`{"foo":"bar"}`,
+		config.ExecutorConfig{
+			NetworkMode:    "none",
+			ReadOnlyRootFS: true,
+			MemoryLimitMB:  512,
+			CPULimit:       1.5,
+		},
+	)
+
+	want := []string{
+		"run",
+		"--rm",
+		"--name",
+		"job-runner-run-41-42",
+		"--network",
+		"none",
+		"--security-opt",
+		"no-new-privileges",
+		"--read-only",
+		"--memory",
+		"512m",
+		"--cpus",
+		"1.5",
+		"--stop-timeout",
+		"30",
+		"-e",
+		"JOB_PARAMS={\"foo\":\"bar\"}",
+		"registry.example/jobs/example:latest",
+	}
+
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %d want %d\n%#v", len(args), len(want), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d] mismatch: got %q want %q\n%#v", i, args[i], want[i], args)
+		}
 	}
 }
 

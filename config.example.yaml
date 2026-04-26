@@ -28,3 +28,9 @@ image:
   remote:
     endpoint: http://192.168.215.1:5001
     insecure: true
+
+executor:
+  network_mode: bridge
+  read_only_rootfs: false
+  memory_limit_mb: 0
+  cpu_limit: 0

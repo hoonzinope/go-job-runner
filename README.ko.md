@@ -42,6 +42,7 @@ cron 또는 인터벌 스케줄로 Docker 이미지 워크로드를 실행합니
 - **Web UI** — 브라우저에서 잡과 실행 목록 조회, 로그 확인, 실행 트리거/취소
 - **REST API** — `/api/v1` 아래 완전한 CRUD 및 운영 엔드포인트 제공
 - **이중 이미지 소스** — 로컬 경로 또는 원격 레지스트리에서 이미지 가져오기
+- **실행기 정책** — Docker 실행은 문서화된 네트워크/리소스 설정으로 제한되며, privileged 모드와 임의 volume mount는 노출하지 않음
 - **자급자족** — 단일 바이너리, 단일 설정 파일, 외부 브로커나 데이터베이스 서버 불필요
 
 ---
@@ -159,6 +160,12 @@ image:
   remote:
     endpoint: http://192.168.215.1:5001
     insecure: true
+
+executor:
+  network_mode: bridge           # bridge | none; host는 의도적으로 거부됨
+  read_only_rootfs: false        # 워크로드 확인 후에만 활성화
+  memory_limit_mb: 0             # 0 = 제한 없음
+  cpu_limit: 0                   # 0 = 제한 없음
 ```
 
 ### 주요 필드
@@ -171,8 +178,14 @@ image:
 | `scheduler.max_concurrent_runs` | 동시에 실행 가능한 최대 실행 수 |
 | `image.pull_policy` | `always`는 매 실행마다 재풀; `if_not_present`는 이미지가 있으면 생략 |
 | `image.allowed_prefixes` | 이미지 ref 접두사 허용 목록; 목록 외의 요청은 거부됨 |
+| `executor.network_mode` | 잡 컨테이너의 Docker 네트워크 모드; `bridge`와 `none`만 허용 |
+| `executor.read_only_rootfs` | `true`일 때 잡 컨테이너를 read-only root filesystem으로 실행 |
+| `executor.memory_limit_mb` | 잡 컨테이너의 선택적 메모리 제한 (`0`이면 미설정) |
+| `executor.cpu_limit` | 잡 컨테이너의 선택적 CPU 제한 (`0`이면 미설정) |
 
 내장 인증은 제공되지 않습니다. 서비스가 non-loopback 주소에서 접근 가능하다면, 신뢰할 수 있는 환경 밖에서 사용하기 전에 reverse proxy, VPN, 또는 IP allowlist로 보호하세요.
+
+Docker 실행기는 호스트 Docker 소켓을 사용하므로, 러너는 로컬 Docker daemon에 영향을 줄 수 있습니다. 이 저장소는 privileged 모드와 임의 volume mount를 config로 노출하지 않습니다. 네트워크 모드와 리소스 제한만 실행기 수준에서 지원하며, 그 외 옵션은 현재 범위 밖으로 봐야 합니다.
 
 ---
 

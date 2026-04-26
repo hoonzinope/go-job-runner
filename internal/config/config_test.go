@@ -38,6 +38,12 @@ image:
   remote:
     endpoint: http://registry:5000
     insecure: true
+
+executor:
+  network_mode: bridge
+  read_only_rootfs: true
+  memory_limit_mb: 512
+  cpu_limit: 1.5
 `)
 
 	cfg, err := LoadConfig(dir)
@@ -59,6 +65,9 @@ image:
 	}
 	if cfg.Image.Remote.Endpoint != "http://registry:5000" || !cfg.Image.Remote.Insecure {
 		t.Fatalf("unexpected remote config: %+v", cfg.Image.Remote)
+	}
+	if cfg.Executor.NetworkMode != "bridge" || !cfg.Executor.ReadOnlyRootFS || cfg.Executor.MemoryLimitMB != 512 || cfg.Executor.CPULimit != 1.5 {
+		t.Fatalf("unexpected executor config: %+v", cfg.Executor)
 	}
 }
 
@@ -196,6 +205,27 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: "image remote.endpoint is required when remote source is enabled",
 		},
+		{
+			name: "unsupported executor network mode",
+			mutate: func(c *Config) {
+				c.Executor.NetworkMode = "host"
+			},
+			wantErr: `unsupported executor network_mode: "host"`,
+		},
+		{
+			name: "negative executor memory limit",
+			mutate: func(c *Config) {
+				c.Executor.MemoryLimitMB = -1
+			},
+			wantErr: "executor memory_limit_mb must be >= 0",
+		},
+		{
+			name: "negative executor cpu limit",
+			mutate: func(c *Config) {
+				c.Executor.CPULimit = -0.5
+			},
+			wantErr: "executor cpu_limit must be >= 0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -280,6 +310,12 @@ func validConfig() Config {
 				Endpoint: "http://registry:5000",
 				Insecure: true,
 			},
+		},
+		Executor: ExecutorConfig{
+			NetworkMode:    "bridge",
+			ReadOnlyRootFS: true,
+			MemoryLimitMB:  512,
+			CPULimit:       1.5,
 		},
 	}
 }

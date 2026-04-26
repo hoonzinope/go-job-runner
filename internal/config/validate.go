@@ -79,6 +79,18 @@ func (c *Config) Validate() error {
 	if remoteEnabled && c.Image.Remote.Endpoint == "" {
 		return fmt.Errorf("image remote.endpoint is required when remote source is enabled")
 	}
+
+	switch strings.ToLower(strings.TrimSpace(c.Executor.NetworkMode)) {
+	case "", "bridge", "none":
+	default:
+		return fmt.Errorf("unsupported executor network_mode: %q", c.Executor.NetworkMode)
+	}
+	if c.Executor.MemoryLimitMB < 0 {
+		return fmt.Errorf("executor memory_limit_mb must be >= 0")
+	}
+	if c.Executor.CPULimit < 0 {
+		return fmt.Errorf("executor cpu_limit must be >= 0")
+	}
 	return nil
 }
 

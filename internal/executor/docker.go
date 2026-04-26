@@ -44,10 +44,10 @@ type DockerExecutor struct {
 	resultWriter *logwriter.ResultWriter
 }
 
-func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig) *DockerExecutor {
+func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig, execCfg config.ExecutorConfig) *DockerExecutor {
 	return &DockerExecutor{
 		resolver:     image.NewResolver(imageCfg),
-		runner:       &realDockerRunner{pullPolicy: imageCfg.PullPolicy},
+		runner:       &realDockerRunner{pullPolicy: imageCfg.PullPolicy, execCfg: execCfg},
 		logWriter:    logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
 		resultWriter: logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
 	}
@@ -161,6 +161,7 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 
 type realDockerRunner struct {
 	pullPolicy string
+	execCfg    config.ExecutorConfig
 }
 
 func (r *realDockerRunner) EnsureImage(ctx context.Context, imageRef string) error {
@@ -203,15 +204,7 @@ func (r *realDockerRunner) PrepareContainer(ctx context.Context, containerName s
 }
 
 func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imageRef string, timeoutSec int, paramsJSON string, stdout, stderr io.Writer) error {
-	args := []string{"run", "--rm", "--name", containerName}
-	if timeoutSec > 0 {
-		args = append(args, "--stop-timeout", strconv.Itoa(timeoutSec))
-	}
-	if strings.TrimSpace(paramsJSON) != "" {
-		args = append(args, "-e", "JOB_PARAMS="+paramsJSON)
-	}
-	args = append(args, imageRef)
-
+	args := dockerRunArgs(containerName, imageRef, timeoutSec, paramsJSON, r.execCfg)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -236,6 +229,35 @@ func (r *realDockerRunner) RunContainer(ctx context.Context, containerName, imag
 	case err := <-waitCh:
 		return err
 	}
+}
+
+func dockerRunArgs(containerName, imageRef string, timeoutSec int, paramsJSON string, execCfg config.ExecutorConfig) []string {
+	args := []string{"run", "--rm", "--name", containerName}
+
+	switch strings.ToLower(strings.TrimSpace(execCfg.NetworkMode)) {
+	case "", "bridge":
+		args = append(args, "--network", "bridge")
+	case "none":
+		args = append(args, "--network", "none")
+	}
+	args = append(args, "--security-opt", "no-new-privileges")
+	if execCfg.ReadOnlyRootFS {
+		args = append(args, "--read-only")
+	}
+	if execCfg.MemoryLimitMB > 0 {
+		args = append(args, "--memory", strconv.Itoa(execCfg.MemoryLimitMB)+"m")
+	}
+	if execCfg.CPULimit > 0 {
+		args = append(args, "--cpus", strconv.FormatFloat(execCfg.CPULimit, 'f', -1, 64))
+	}
+	if timeoutSec > 0 {
+		args = append(args, "--stop-timeout", strconv.Itoa(timeoutSec))
+	}
+	if strings.TrimSpace(paramsJSON) != "" {
+		args = append(args, "-e", "JOB_PARAMS="+paramsJSON)
+	}
+	args = append(args, imageRef)
+	return args
 }
 
 func (e *DockerExecutor) writeResult(resultFile *os.File, record *logwriter.ResultRecord) error {

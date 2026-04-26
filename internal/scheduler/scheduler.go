@@ -47,7 +47,7 @@ func NewScheduler(cfg *config.Config, st *store.Store) *Scheduler {
 		dueWakeup:         make(chan struct{}, 1),
 		dispatchWakeup:    make(chan struct{}, 1),
 		workerTokens:      make(chan struct{}, cfg.Scheduler.MaxConcurrentRuns),
-		executor:          executor.NewDockerExecutor(cfg.Store, cfg.Image),
+		executor:          executor.NewDockerExecutor(cfg.Store, cfg.Image, cfg.Executor),
 	}
 }
 

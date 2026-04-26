@@ -32,9 +32,17 @@ type ImageConfig struct {
 	Remote          ImageRemoteConfig `yaml:"remote" mapstructure:"remote"`
 }
 
+type ExecutorConfig struct {
+	NetworkMode    string  `yaml:"network_mode" mapstructure:"network_mode"`
+	ReadOnlyRootFS bool    `yaml:"read_only_rootfs" mapstructure:"read_only_rootfs"`
+	MemoryLimitMB  int     `yaml:"memory_limit_mb" mapstructure:"memory_limit_mb"`
+	CPULimit       float64 `yaml:"cpu_limit" mapstructure:"cpu_limit"`
+}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server" mapstructure:"server"`
 	Store     StoreConfig     `yaml:"store" mapstructure:"store"`
 	Scheduler SchedulerConfig `yaml:"scheduler" mapstructure:"scheduler"`
 	Image     ImageConfig     `yaml:"image" mapstructure:"image"`
+	Executor  ExecutorConfig  `yaml:"executor" mapstructure:"executor"`
 }
