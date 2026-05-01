@@ -107,7 +107,8 @@ type runListFilter struct {
 
 type runListItem struct {
 	model.Run
-	JobName string
+	JobName   string
+	CanCancel bool
 }
 
 type runDetailPage struct {
@@ -133,6 +134,12 @@ func New(jobs *service.JobService, runs *service.RunService, resolver *image.Res
 				return "—"
 			}
 			return t.UTC().Format("2006-01-02 15:04:05 UTC")
+		},
+		"formatCompactTime": func(t *time.Time) string {
+			if t == nil || t.IsZero() {
+				return "—"
+			}
+			return t.UTC().Format("01-02 15:04")
 		},
 		"formatValue": func(v any) string {
 			value := reflect.ValueOf(v)
@@ -462,7 +469,10 @@ func (u *UI) listRuns(c *gin.Context) {
 	items := make([]runListItem, 0, len(runs))
 	for i := range runs {
 		job, _ := u.jobs.GetJob(c.Request.Context(), runs[i].JobID)
-		item := runListItem{Run: runs[i]}
+		item := runListItem{
+			Run:       runs[i],
+			CanCancel: runs[i].Status == model.RunStatusPending || runs[i].Status == model.RunStatusRunning || runs[i].Status == model.RunStatusCancelling,
+		}
 		if job != nil {
 			item.JobName = job.Name
 		}
@@ -472,7 +482,7 @@ func (u *UI) listRuns(c *gin.Context) {
 	u.renderOrError(c, http.StatusOK, "base", runsListPage{
 		pageMeta: pageMeta{
 			Title:           "Runs",
-			Subtitle:        "Recent run history and execution state",
+			Subtitle:        "Recent run history, live execution state, and direct cancellation control",
 			ActiveNav:       "runs",
 			ContentTemplate: "runs_list_content",
 		},

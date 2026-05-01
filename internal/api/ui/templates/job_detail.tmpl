@@ -1,11 +1,12 @@
 {{ define "job_detail_content" }}
-<section class="card">
-  <div class="actions" style="justify-content: space-between; align-items: center;">
+<section class="card hero-surface">
+  <div class="hero-topline">
     <div>
-      <div class="muted">Job ID {{ .Job.ID }}</div>
-      <strong style="font-size: 22px;">{{ .Job.Name }}</strong>
+      <div class="hero-kicker">Job ID {{ .Job.ID }}</div>
+      <h2 class="hero-title">{{ .Job.Name }}</h2>
+      <p class="hero-subtitle">{{ formatValue .Job.Description }}</p>
     </div>
-    <div class="actions">
+    <div class="hero-actions">
       <a class="btn" href="/jobs">Back</a>
       <a class="btn" href="/jobs/{{ .Job.ID }}/edit">Edit</a>
       <form method="post" action="/jobs/{{ .Job.ID }}/trigger" style="display:inline;">
@@ -17,62 +18,126 @@
       </form>
     </div>
   </div>
-</section>
-
-<section class="card">
-  <h2 class="section-title">Definition</h2>
-  <div class="meta-list">
-    <div class="meta-row"><div class="meta-key">Enabled</div><div class="meta-value">{{ if .Job.Enabled }}Yes{{ else }}No{{ end }}</div></div>
-    <div class="meta-row"><div class="meta-key">Source Type</div><div class="meta-value">{{ .Job.SourceType }}</div></div>
-    <div class="meta-row"><div class="meta-key">Image Ref</div><div class="meta-value">{{ .Job.ImageRef }}</div></div>
-    <div class="meta-row"><div class="meta-key">Image Digest</div><div class="meta-value">{{ formatValue .Job.ImageDigest }}</div></div>
-    <div class="meta-row"><div class="meta-key">Schedule Type</div><div class="meta-value">{{ .Job.ScheduleType }}</div></div>
-    <div class="meta-row"><div class="meta-key">Schedule Expr</div><div class="meta-value">{{ formatValue .Job.ScheduleExpr }}</div></div>
-    <div class="meta-row"><div class="meta-key">Interval Sec</div><div class="meta-value">{{ formatValue .Job.IntervalSec }}</div></div>
-    <div class="meta-row"><div class="meta-key">Timezone</div><div class="meta-value">{{ .Job.Timezone }}</div></div>
-    <div class="meta-row"><div class="meta-key">Concurrency Policy</div><div class="meta-value">{{ .Job.ConcurrencyPolicy }}</div></div>
-    <div class="meta-row"><div class="meta-key">Retry Limit</div><div class="meta-value">{{ .Job.RetryLimit }}</div></div>
-    <div class="meta-row"><div class="meta-key">Timeout Sec</div><div class="meta-value">{{ .Job.TimeoutSec }}</div></div>
-    <div class="meta-row"><div class="meta-key">Next Run At</div><div class="meta-value">{{ formatTime .Job.NextRunAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Last Scheduled At</div><div class="meta-value">{{ formatTime .Job.LastScheduledAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Params JSON</div><div class="meta-value code">{{ jsonPretty (formatValue .Job.ParamsJSON) }}</div></div>
+  <div class="metric-grid">
+    <div class="metric"><span class="label">Enabled</span><span class="value">{{ if .Job.Enabled }}Yes{{ else }}No{{ end }}</span></div>
+    <div class="metric"><span class="label">Source</span><span class="value">{{ .Job.SourceType }}</span></div>
+    <div class="metric"><span class="label">Schedule</span><span class="value">{{ .Job.ScheduleType }}</span></div>
+    <div class="metric"><span class="label">Timezone</span><span class="value">{{ .Job.Timezone }}</span></div>
+    <div class="metric"><span class="label">Next Run</span><span class="value">{{ formatTime .Job.NextRunAt }}</span></div>
+    <div class="metric"><span class="label">Last Scheduled</span><span class="value">{{ formatTime .Job.LastScheduledAt }}</span></div>
   </div>
 </section>
 
-<section class="card">
-  <div class="actions" style="justify-content: space-between; align-items: center;">
-  <h2 class="section-title" style="margin: 0;">Recent Runs</h2>
-  <div class="muted">Showing up to 10 runs</div>
-  </div>
-  {{ if .HasRecent }}
-  <div class="table-shell">
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Scheduled At</th>
-        <th>Status</th>
-        <th>Attempt</th>
-        <th>Exit</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{ range .RecentRuns }}
-      <tr>
-        <td><a href="/runs/{{ .ID }}">{{ .ID }}</a></td>
-        <td>{{ formatTime .ScheduledAt }}</td>
-        <td><span class="{{ statusClass .Status }}">{{ .Status }}</span></td>
-        <td>{{ .Attempt }}</td>
-        <td>{{ formatValue .ExitCode }}</td>
-        <td><a class="btn" href="/runs/{{ .ID }}">View</a></td>
-      </tr>
+<div class="detail-grid">
+  <div class="detail-stack">
+    <section class="card">
+      <div class="section-toolbar">
+        <div>
+          <h2 class="section-title" style="margin: 0;">Definition</h2>
+          <p class="muted" style="margin: 6px 0 0;">Canonical job configuration and scheduling limits.</p>
+        </div>
+      </div>
+      <div class="meta-list">
+        <div class="meta-row"><div class="meta-key">Description</div><div class="meta-value">{{ formatValue .Job.Description }}</div></div>
+        <div class="meta-row"><div class="meta-key">Image Ref</div><div class="meta-value">{{ .Job.ImageRef }}</div></div>
+        <div class="meta-row"><div class="meta-key">Image Digest</div><div class="meta-value">{{ formatValue .Job.ImageDigest }}</div></div>
+        <div class="meta-row"><div class="meta-key">Schedule Expr</div><div class="meta-value">{{ formatValue .Job.ScheduleExpr }}</div></div>
+        <div class="meta-row"><div class="meta-key">Interval Sec</div><div class="meta-value">{{ formatValue .Job.IntervalSec }}</div></div>
+        <div class="meta-row"><div class="meta-key">Concurrency Policy</div><div class="meta-value">{{ .Job.ConcurrencyPolicy }}</div></div>
+        <div class="meta-row"><div class="meta-key">Retry Limit</div><div class="meta-value">{{ .Job.RetryLimit }}</div></div>
+        <div class="meta-row"><div class="meta-key">Timeout Sec</div><div class="meta-value">{{ .Job.TimeoutSec }}</div></div>
+        <div class="meta-row"><div class="meta-key">Created At</div><div class="meta-value">{{ formatTime .Job.CreatedAt }}</div></div>
+        <div class="meta-row"><div class="meta-key">Updated At</div><div class="meta-value">{{ formatTime .Job.UpdatedAt }}</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Parameters</h2>
+      <p class="muted" style="margin: -6px 0 12px;">Rendered JSON, preserving formatting for operators and copy/paste. Keep an eye on any secrets or credentials embedded in the payload.</p>
+      <pre class="code">{{ jsonPretty (formatValue .Job.ParamsJSON) }}</pre>
+    </section>
+
+    <section class="card">
+      <div class="section-toolbar">
+        <div>
+          <h2 class="section-title" style="margin: 0;">Recent Runs</h2>
+          <p class="muted" style="margin: 6px 0 0;">Showing up to 10 runs.</p>
+        </div>
+      </div>
+      {{ if .HasRecent }}
+      <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Scheduled At</th>
+            <th>Status</th>
+            <th>Attempt</th>
+            <th>Exit</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .RecentRuns }}
+          <tr>
+            <td><a href="/runs/{{ .ID }}">{{ .ID }}</a></td>
+            <td>{{ formatTime .ScheduledAt }}</td>
+            <td><span class="{{ statusClass .Status }}">{{ .Status }}</span></td>
+            <td>{{ .Attempt }}</td>
+            <td>{{ formatValue .ExitCode }}</td>
+            <td><a class="btn" href="/runs/{{ .ID }}">View</a></td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      </div>
+      {{ else }}
+      <div class="empty">No recent runs found.</div>
       {{ end }}
-    </tbody>
-  </table>
+    </section>
   </div>
-  {{ else }}
-  <div class="empty">No recent runs found.</div>
-  {{ end }}
-</section>
+
+  <aside class="detail-rail">
+    <section class="card">
+      <h2 class="section-title">Quick Actions</h2>
+      <div class="mini-list">
+        <div class="actions">
+          <a class="btn" href="/jobs">Back to Jobs</a>
+          <a class="btn" href="/jobs/{{ .Job.ID }}/edit">Edit Job</a>
+        </div>
+        <form method="post" action="/jobs/{{ .Job.ID }}/trigger">
+          <input type="hidden" name="reason" value="Triggered from UI">
+          <button class="btn primary" type="submit" style="width: 100%;">Trigger Now</button>
+        </form>
+        <form method="post" action="/jobs/{{ .Job.ID }}/delete" onsubmit="return confirm('Delete this job?');">
+          <button class="btn danger" type="submit" style="width: 100%;">Delete Job</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Operational Snapshot</h2>
+      <div class="mini-list">
+        <div class="mini-row"><span class="label">Enabled</span><span class="value">{{ if .Job.Enabled }}Yes{{ else }}No{{ end }}</span></div>
+        <div class="mini-row"><span class="label">Source Type</span><span class="value">{{ .Job.SourceType }}</span></div>
+        <div class="mini-row"><span class="label">Schedule Type</span><span class="value">{{ .Job.ScheduleType }}</span></div>
+        <div class="mini-row"><span class="label">Timezone</span><span class="value">{{ .Job.Timezone }}</span></div>
+        <div class="mini-row"><span class="label">Next Run At</span><span class="value">{{ formatTime .Job.NextRunAt }}</span></div>
+        <div class="mini-row"><span class="label">Last Scheduled At</span><span class="value">{{ formatTime .Job.LastScheduledAt }}</span></div>
+        <div class="mini-row"><span class="label">Retry Limit</span><span class="value">{{ .Job.RetryLimit }}</span></div>
+        <div class="mini-row"><span class="label">Timeout Sec</span><span class="value">{{ .Job.TimeoutSec }}</span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Image Context</h2>
+      <div class="mini-list">
+        <div class="mini-row"><span class="label">Image Ref</span><span class="value">{{ .Job.ImageRef }}</span></div>
+        <div class="mini-row"><span class="label">Image Digest</span><span class="value">{{ formatValue .Job.ImageDigest }}</span></div>
+        <div class="mini-row"><span class="label">Schedule Expr</span><span class="value">{{ formatValue .Job.ScheduleExpr }}</span></div>
+        <div class="mini-row"><span class="label">Interval Sec</span><span class="value">{{ formatValue .Job.IntervalSec }}</span></div>
+      </div>
+    </section>
+  </aside>
+</div>
 {{ end }}

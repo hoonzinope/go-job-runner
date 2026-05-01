@@ -1,5 +1,15 @@
 {{ define "jobs_list_content" }}
 <section class="card">
+  <div class="actions" style="justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <div>
+      <h2 class="section-title" style="margin: 0;">Registered Jobs</h2>
+      <p class="muted" style="margin: 6px 0 0; max-width: 64ch;">Use the filters below to narrow the scheduler state, then jump into a job to edit its schedule, inspect the image resolution, or trigger it immediately.</p>
+    </div>
+    <div class="actions">
+      <span class="btn" style="cursor: default;">{{ .Pagination.Total }} total</span>
+      <a class="btn primary" href="/jobs/new">New Job</a>
+    </div>
+  </div>
   <form method="get" action="/jobs" class="grid three">
     <div class="field">
       <label for="name">Name</label>
@@ -24,7 +34,6 @@
     <div class="actions" style="grid-column: 1 / -1;">
       <button class="btn primary" type="submit">Search</button>
       <a class="btn" href="/jobs">Reset</a>
-      <a class="btn primary" href="/jobs/new">New Job</a>
     </div>
   </form>
 </section>
@@ -41,7 +50,7 @@
         <th>Schedule</th>
         <th>Next Run</th>
         <th>Last Scheduled</th>
-        <th>Policy</th>
+        <th>Execution</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -50,7 +59,7 @@
       <tr>
         <td>{{ .ID }}</td>
         <td>
-          <div><a href="/jobs/{{ .ID }}">{{ .Name }}</a></div>
+          <div><a href="/jobs/{{ .ID }}" style="white-space: nowrap;">{{ .Name }}</a></div>
           <div class="muted">{{ formatValue .Description }}</div>
         </td>
         <td>{{ if .Enabled }}Yes{{ else }}No{{ end }}</td>
@@ -64,9 +73,12 @@
             {{ end }}
           </div>
         </td>
-        <td>{{ formatTime .NextRunAt }}</td>
-        <td>{{ formatTime .LastScheduledAt }}</td>
-        <td>{{ .ConcurrencyPolicy }}</td>
+        <td style="white-space: nowrap;">{{ formatCompactTime .NextRunAt }}</td>
+        <td style="white-space: nowrap;">{{ formatCompactTime .LastScheduledAt }}</td>
+        <td>
+          <div>{{ .ConcurrencyPolicy }}</div>
+          <div class="muted">retry {{ .RetryLimit }} · timeout {{ formatValue .TimeoutSec }}s</div>
+        </td>
         <td>
           <div class="actions">
             <a class="btn" href="/jobs/{{ .ID }}">View</a>

@@ -1,14 +1,15 @@
 {{ define "run_detail_content" }}
-<section class="card">
-  <div class="actions" style="justify-content: space-between; align-items: center;">
+<section class="card hero-surface">
+  <div class="hero-topline">
     <div>
-      <div class="muted">Run ID {{ .Run.ID }}</div>
-      <strong style="font-size: 22px;">
+      <div class="hero-kicker">Run ID {{ .Run.ID }}</div>
+      <h2 class="hero-title">
         <a href="/jobs/{{ .Run.JobID }}">Job #{{ .Run.JobID }}</a>
         {{ if .Job }}<span class="muted">· {{ .Job.Name }}</span>{{ end }}
-      </strong>
+      </h2>
+      <p class="hero-subtitle">Track the run from scheduling through completion, then inspect the live log and artifact paths below.</p>
     </div>
-    <div class="actions">
+    <div class="hero-actions">
       <a class="btn" href="/runs">Back</a>
       {{ if .CanCancel }}
       <form method="post" action="/runs/{{ .Run.ID }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel this run?');">
@@ -17,71 +18,87 @@
       {{ end }}
     </div>
   </div>
-</section>
-
-<section class="card">
-  <h2 class="section-title">Summary</h2>
-  <div class="meta-list">
-    <div class="meta-row"><div class="meta-key">Status</div><div class="meta-value"><span id="run-status" class="{{ statusClass .Run.Status }}">{{ .Run.Status }}</span></div></div>
-    <div class="meta-row"><div class="meta-key">Scheduled At</div><div class="meta-value">{{ formatTime .Run.ScheduledAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Started At</div><div id="run-started-at" class="meta-value">{{ formatTime .Run.StartedAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Finished At</div><div id="run-finished-at" class="meta-value">{{ formatTime .Run.FinishedAt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Attempt</div><div class="meta-value">{{ .Run.Attempt }}</div></div>
-    <div class="meta-row"><div class="meta-key">Exit Code</div><div id="run-exit-code" class="meta-value">{{ formatValue .Run.ExitCode }}</div></div>
-    <div class="meta-row"><div class="meta-key">Error Message</div><div id="run-error-message" class="meta-value">{{ formatValue .Run.ErrorMessage }}</div></div>
-    <div class="meta-row"><div class="meta-key">Log Path</div><div id="run-log-path" class="meta-value">{{ formatValue .Run.LogPath }}</div></div>
-    <div class="meta-row"><div class="meta-key">Result Path</div><div id="run-result-path" class="meta-value">{{ formatValue .Run.ResultPath }}</div></div>
+  <div class="metric-grid">
+    <div class="metric"><span class="label">Status</span><span class="value"><span class="{{ statusClass .Run.Status }}">{{ .Run.Status }}</span></span></div>
+    <div class="metric"><span class="label">Attempt</span><span class="value">{{ .Run.Attempt }}</span></div>
+    <div class="metric"><span class="label">Exit Code</span><span class="value">{{ formatValue .Run.ExitCode }}</span></div>
+    <div class="metric"><span class="label">Scheduled</span><span class="value">{{ formatTime .Run.ScheduledAt }}</span></div>
+    <div class="metric"><span class="label">Started</span><span class="value">{{ formatTime .Run.StartedAt }}</span></div>
+    <div class="metric"><span class="label">Finished</span><span class="value">{{ formatTime .Run.FinishedAt }}</span></div>
   </div>
 </section>
 
-<section class="card">
-  <h2 class="section-title">Events</h2>
-  {{ if .Events }}
-  <div class="table-shell">
-  <table>
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Type</th>
-        <th>Message</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{ range .Events }}
-      <tr>
-        <td>{{ formatTime .CreatedAt }}</td>
-        <td>{{ .EventType }}</td>
-        <td>{{ formatValue .Message }}</td>
-      </tr>
+<div class="detail-grid">
+  <div class="detail-stack">
+    <section class="card">
+      <h2 class="section-title">Summary</h2>
+      <p class="muted" style="margin: -6px 0 12px;">A compact operational snapshot for the selected run.</p>
+      <div class="meta-list">
+        <div class="meta-row"><div class="meta-key">Status</div><div class="meta-value"><span id="run-status" class="{{ statusClass .Run.Status }}">{{ .Run.Status }}</span></div></div>
+        <div class="meta-row"><div class="meta-key">Scheduled At</div><div class="meta-value">{{ formatTime .Run.ScheduledAt }}</div></div>
+        <div class="meta-row"><div class="meta-key">Started At</div><div id="run-started-at" class="meta-value">{{ formatTime .Run.StartedAt }}</div></div>
+        <div class="meta-row"><div class="meta-key">Finished At</div><div id="run-finished-at" class="meta-value">{{ formatTime .Run.FinishedAt }}</div></div>
+        <div class="meta-row"><div class="meta-key">Attempt</div><div class="meta-value">{{ .Run.Attempt }}</div></div>
+        <div class="meta-row"><div class="meta-key">Exit Code</div><div id="run-exit-code" class="meta-value">{{ formatValue .Run.ExitCode }}</div></div>
+        <div class="meta-row"><div class="meta-key">Error Message</div><div id="run-error-message" class="meta-value">{{ formatValue .Run.ErrorMessage }}</div></div>
+        <div class="meta-row"><div class="meta-key">Log Path</div><div id="run-log-path" class="meta-value">{{ formatValue .Run.LogPath }}</div></div>
+        <div class="meta-row"><div class="meta-key">Result Path</div><div id="run-result-path" class="meta-value">{{ formatValue .Run.ResultPath }}</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Events</h2>
+      <p class="muted" style="margin: -6px 0 12px;">The event stream records scheduler and worker transitions for this run.</p>
+      {{ if .Events }}
+      <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Events }}
+          <tr>
+            <td>{{ formatTime .CreatedAt }}</td>
+            <td>{{ .EventType }}</td>
+            <td>{{ formatValue .Message }}</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+      </div>
+      {{ else }}
+      <div class="empty">No events recorded.</div>
       {{ end }}
-    </tbody>
-  </table>
+    </section>
   </div>
-  {{ else }}
-  <div class="empty">No events recorded.</div>
-  {{ end }}
-</section>
 
-<section class="grid two">
-  <div class="card">
-    <h2 class="section-title">Logs</h2>
-    {{ if .LogContent }}
-    <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset {{ .LogOffset }}, size {{ .LogSize }}</div>
-    <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="{{ .LogOffset }}" data-log-size="{{ .LogSize }}">{{ .LogContent }}</pre>
-    {{ else }}
-    <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset 0, size 0</div>
-    <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="0" data-log-size="0"></pre>
-    {{ end }}
-  </div>
-  <div class="card">
-    <h2 class="section-title">Result</h2>
-    {{ if .ResultContent }}
-    <pre class="code">{{ .ResultContent }}</pre>
-    {{ else }}
-    <div class="empty">No result content available.</div>
-    {{ end }}
-  </div>
-</section>
+  <aside class="detail-rail">
+    <section class="card">
+      <h2 class="section-title">Logs</h2>
+      <p class="muted" style="margin: -6px 0 12px;">Streaming view of the captured log file. It refreshes while the run is active.</p>
+      {{ if .LogContent }}
+      <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset {{ .LogOffset }}, size {{ .LogSize }}</div>
+      <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="{{ .LogOffset }}" data-log-size="{{ .LogSize }}">{{ .LogContent }}</pre>
+      {{ else }}
+      <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset 0, size 0</div>
+      <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="0" data-log-size="0"></pre>
+      {{ end }}
+    </section>
+    <section class="card">
+      <h2 class="section-title">Result</h2>
+      <p class="muted" style="margin: -6px 0 12px;">Final output written by the job, when available.</p>
+      {{ if .ResultContent }}
+      <pre class="code">{{ .ResultContent }}</pre>
+      {{ else }}
+      <div class="empty">No result content available.</div>
+      {{ end }}
+    </section>
+  </aside>
+</div>
 
 <script>
 (function () {

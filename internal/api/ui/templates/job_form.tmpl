@@ -4,7 +4,7 @@
     <div class="actions" style="justify-content: space-between; align-items: center;">
       <div>
         <div class="muted">Mode</div>
-        <strong>{{ .Mode }}</strong>
+        <strong style="text-transform: capitalize;">{{ .Mode }}</strong>
       </div>
       <div class="actions">
         <a class="btn" href="/jobs">Back to list</a>
@@ -21,7 +21,8 @@
   {{ end }}
 
   <section class="card">
-    <h2 class="section-title">Job Definition</h2>
+    <h2 class="section-title">Core Definition</h2>
+    <p class="muted" style="margin: -6px 0 16px;">Keep the identity and source details together so the job reads like a single operational object instead of a flat form.</p>
     <div class="grid two">
       <div class="field">
         <label for="name">Name</label>
@@ -49,6 +50,13 @@
         <input id="imageRef" name="imageRef" value="{{ .Job.ImageRef }}" placeholder="jobs/example:latest">
         {{ with fieldError .FieldErrors "imageRef" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">Scheduling</h2>
+    <p class="muted" style="margin: -6px 0 16px;">Choose one schedule mode and keep the matching field visible. The inactive field can stay empty.</p>
+    <div class="grid two">
       <div class="field">
         <label for="scheduleType">Schedule Type</label>
         <select id="scheduleType" name="scheduleType">
@@ -72,6 +80,13 @@
         <input id="intervalSec" name="intervalSec" value="{{ inputInt .Job.IntervalSec }}" placeholder="60">
         {{ with fieldError .FieldErrors "intervalSec" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">Execution</h2>
+    <p class="muted" style="margin: -6px 0 16px;">These controls shape how the scheduler handles overlap, retries, and runtime limits.</p>
+    <div class="grid two">
       <div class="field">
         <label for="concurrencyPolicy">Concurrency Policy</label>
         <select id="concurrencyPolicy" name="concurrencyPolicy">
@@ -90,6 +105,13 @@
         <input id="timeoutSec" name="timeoutSec" value="{{ .Job.TimeoutSec }}" type="number" min="0">
         {{ with fieldError .FieldErrors "timeoutSec" }}<div class="muted" style="color: var(--danger);">{{ . }}</div>{{ end }}
       </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="section-title">Notes and Parameters</h2>
+    <p class="muted" style="margin: -6px 0 16px;">Use the description for operator context and the JSON field for runtime parameters.</p>
+    <div class="grid">
       <div class="field" style="grid-column: 1 / -1;">
         <label for="description">Description</label>
         <textarea id="description" name="description" placeholder="Optional note">{{ inputString .Job.Description }}</textarea>
@@ -106,7 +128,7 @@
   <div class="actions" style="justify-content: space-between; align-items: center; margin-bottom: 12px;">
     <div>
       <h2 class="section-title" style="margin: 0;">Image Panel</h2>
-      <p class="muted" style="margin: 4px 0 0;">Preview candidates and resolve the current image ref.</p>
+      <p class="muted" style="margin: 4px 0 0; max-width: 62ch;">Preview candidates and resolve the current image ref. This panel is a sidecar to the form, so the primary settings stay readable above it.</p>
     </div>
     <form method="get" action="{{ if eq .Mode "edit" }}/jobs/{{ .Job.ID }}/edit{{ else }}/jobs/new{{ end }}" class="actions">
       <div class="field" style="min-width: 140px;">
@@ -141,6 +163,7 @@
   <div class="grid two">
     <div>
       <h3 class="section-title">Resolved</h3>
+      <p class="muted" style="margin: -6px 0 12px;">Current resolution result for the preview inputs above.</p>
       {{ if and .Image .Image.Resolved }}
       <div class="meta-list">
         <div class="meta-row"><div class="meta-key">Source Type</div><div class="meta-value">{{ .Image.Resolved.SourceType }}</div></div>
@@ -154,6 +177,7 @@
     </div>
     <div>
       <h3 class="section-title">Candidates</h3>
+      <p class="muted" style="margin: -6px 0 12px;">Pick the candidate that should populate the image ref field.</p>
       {{ if and .Image .Image.Candidates }}
       <table>
         <thead>
