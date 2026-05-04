@@ -203,6 +203,52 @@ func TestRunWorkerTransitionsSuccess(t *testing.T) {
 	}
 }
 
+func TestRunWorkerSkipsAlreadyClaimedRun(t *testing.T) {
+	t.Parallel()
+
+	st := openSchedulerTestStore(t)
+	job := createTestJob(t, st, 0)
+	run := createTestRun(t, st, job.ID)
+
+	startedAt := time.Date(2026, time.April, 17, 12, 5, 0, 0, time.UTC)
+	ok, err := st.Runs.ClaimPending(context.Background(), run.ID, startedAt)
+	if err != nil {
+		t.Fatalf("claim run: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected claim to succeed")
+	}
+
+	execGuard := &cancelGuardExecutor{}
+	s := newTestScheduler(st)
+	s.setExecutor(execGuard)
+
+	s.runWorker(context.Background(), run.ID)
+
+	if execGuard.called {
+		t.Fatal("executor should not be called for already claimed run")
+	}
+
+	updatedRun, err := st.Runs.Get(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updatedRun.Status != model.RunStatusRunning {
+		t.Fatalf("expected run to stay running, got %s", updatedRun.Status)
+	}
+	if updatedRun.StartedAt == nil || !updatedRun.StartedAt.Equal(startedAt) {
+		t.Fatalf("unexpected started_at: %+v", updatedRun.StartedAt)
+	}
+
+	events, err := st.Events.ListByRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no events from skipped worker, got %+v", events)
+	}
+}
+
 func TestRunWorkerTransitionsCancelledBeforeExecution(t *testing.T) {
 	t.Parallel()
 

@@ -186,6 +186,25 @@ func (r *RunRepo) UpdateStatus(ctx context.Context, id int64, status model.RunSt
 	return nil
 }
 
+func (r *RunRepo) ClaimPending(ctx context.Context, id int64, startedAt time.Time) (bool, error) {
+	updatedAt := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE runs SET
+			status = ?,
+			started_at = ?,
+			updated_at = ?
+		WHERE id = ? AND status = ?
+	`, string(model.RunStatusRunning), encodeTime(startedAt), encodeTime(updatedAt), id, string(model.RunStatusPending))
+	if err != nil {
+		return false, fmt.Errorf("claim pending run: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim pending run affected rows: %w", err)
+	}
+	return rowsAffected == 1, nil
+}
+
 func (r *RunRepo) UpdateLogArtifacts(ctx context.Context, id int64, logPath, resultPath *string) error {
 	updatedAt := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `

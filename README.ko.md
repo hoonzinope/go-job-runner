@@ -229,11 +229,11 @@ retention:
 
 내장 인증은 제공되지 않습니다. 서비스가 non-loopback 주소에서 접근 가능하다면, 신뢰할 수 있는 환경 밖에서 사용하기 전에 reverse proxy, VPN, 또는 IP allowlist로 보호하세요.
 
-Docker 실행기는 결정적 컨테이너 이름 `job-runner-run-<jobID>-<runID>`를 사용합니다. 러너가 생성한 모든 컨테이너에는 `go-job-runner.managed=true`, `go-job-runner=true`, `go-job-runner.job-id=<jobID>`, `go-job-runner.run-id=<runID>` label이 붙습니다. 각 실행 전에는 같은 결정적 이름의 기존 컨테이너를 제거해, 남은 이름이 재시도나 복구를 막지 않게 합니다.
+Docker 실행기는 사람이 읽기 쉬운 prefix와 고유 suffix를 결합한 컨테이너 이름 `job-runner-run-<jobID>-<runID>-<uuid>`를 사용합니다. 러너가 생성한 모든 컨테이너에는 `go-job-runner.managed=true`, `go-job-runner=true`, `go-job-runner.job-id=<jobID>`, `go-job-runner.run-id=<runID>` label이 붙습니다. 실행 시작, launch, 종료, stop 시점에는 실제 컨테이너 이름이 로그에 남아 run 기록과 Docker 활동을 쉽게 연결할 수 있습니다. 시작 시 복구는 label 기준으로 runner-managed orphan 컨테이너를 제거합니다.
 
 `executor.cleanup_containers=true`이면 성공과 실패 후 컨테이너를 제거합니다. 타임아웃, API 취소, 프로세스 종료로 인한 context cancel은 먼저 `docker stop -t <stop_grace_period_sec>`를 보내고 이후 컨테이너 제거를 시도합니다. 컨테이너 프로세스 종료 후 cleanup이 실패하면 run은 Docker cleanup error로 실패해 누수가 상태와 로그에 드러납니다. 타임아웃/취소 처리 중 cleanup이 실패하면 run 결과는 타임아웃/취소로 유지되며, label이 남은 컨테이너는 시작 시 복구 대상이 됩니다.
 
-`executor.orphan_recovery_on_startup=true`이면 스케줄러 시작 시 Docker에서 `go-job-runner.managed=true` 컨테이너를 스캔해 pending work를 dispatch하기 전에 제거합니다. 이 동작은 러너 crash나 cleanup 실패로 남은 Docker 리소스를 정리합니다. 이 스캔은 SQLite run status를 직접 다시 쓰지 않습니다. run 상태 복구는 기존 스케줄러 상태 흐름을 따르고, Docker cleanup은 label 기반의 idempotent 작업으로 처리합니다.
+`executor.orphan_recovery_on_startup=true`이면 스케줄러 시작 시 Docker에서 `go-job-runner.managed=true` 컨테이너를 스캔해 pending work를 dispatch하기 전에 제거합니다. 이 동작은 러너 crash나 cleanup 실패로 남은 Docker 리소스를 정리합니다. 이 스캔은 SQLite run status를 직접 다시 쓰지 않습니다. run 상태 복구는 기존 스케줄러 상태 흐름을 따르고, Docker cleanup은 label 기반의 idempotent 작업으로 처리합니다. 고유 suffix 덕분에 stale name 충돌을 피하면서도 prefix는 그대로 읽을 수 있습니다.
 
 Docker 실행기는 호스트 Docker 소켓을 사용하므로, 러너는 로컬 Docker daemon에 영향을 줄 수 있습니다. 이 저장소는 privileged 모드와 임의 volume mount를 config로 노출하지 않습니다. 네트워크 모드와 리소스 제한만 실행기 수준에서 지원하며, 그 외 옵션은 현재 범위 밖으로 봐야 합니다.
 

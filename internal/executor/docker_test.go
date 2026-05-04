@@ -117,6 +117,9 @@ func TestExecuteHappyPath(t *testing.T) {
 	t.Parallel()
 
 	exec := newTestExecutor(t)
+	exec.containerNameFunc = func(jobID, runID int64) string {
+		return runnerContainerNameWithSuffix(jobID, runID, "test")
+	}
 	resolver := &fakeResolver{
 		allowed: true,
 		candidate: &image.Candidate{
@@ -146,7 +149,7 @@ func TestExecuteHappyPath(t *testing.T) {
 	if runner.prepareCalls != 1 {
 		t.Fatalf("prepare call count mismatch: %+v", runner)
 	}
-	if runner.lastContainer != "job-runner-run-41-42" {
+	if runner.lastContainer != "job-runner-run-41-42-test" {
 		t.Fatalf("container name mismatch: %q", runner.lastContainer)
 	}
 	if runner.lastImageRef != "registry.example/jobs/example:latest" {
@@ -182,7 +185,7 @@ func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
 
 	args := dockerRunArgs(
 		containerSpec{
-			Name:       "job-runner-run-41-42",
+			Name:       runnerContainerNameWithSuffix(41, 42, "test"),
 			JobID:      41,
 			RunID:      42,
 			ImageRef:   "registry.example/jobs/example:latest",
@@ -201,7 +204,7 @@ func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
 	want := []string{
 		"run",
 		"--name",
-		"job-runner-run-41-42",
+		runnerContainerNameWithSuffix(41, 42, "test"),
 		"--label",
 		"go-job-runner.managed=true",
 		"--label",
@@ -233,6 +236,18 @@ func TestDockerRunArgsAppliesExecutorPolicy(t *testing.T) {
 		if args[i] != want[i] {
 			t.Fatalf("args[%d] mismatch: got %q want %q\n%#v", i, args[i], want[i], args)
 		}
+	}
+}
+
+func TestRunnerContainerNameAddsUniqueSuffix(t *testing.T) {
+	t.Parallel()
+
+	name := runnerContainerNameWithSuffix(41, 42, "abc123")
+	if !strings.HasPrefix(name, "job-runner-run-41-42-") {
+		t.Fatalf("unexpected container name prefix: %q", name)
+	}
+	if !strings.HasSuffix(name, "abc123") {
+		t.Fatalf("unexpected container name suffix: %q", name)
 	}
 }
 

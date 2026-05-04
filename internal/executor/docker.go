@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hoonzinope/go-job-runner/internal/config"
 	"github.com/hoonzinope/go-job-runner/internal/image"
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
@@ -48,18 +50,20 @@ type containerRunner interface {
 }
 
 type DockerExecutor struct {
-	resolver     imageResolver
-	runner       containerRunner
-	logWriter    *logwriter.Writer
-	resultWriter *logwriter.ResultWriter
+	resolver          imageResolver
+	runner            containerRunner
+	logWriter         *logwriter.Writer
+	resultWriter      *logwriter.ResultWriter
+	containerNameFunc func(jobID, runID int64) string
 }
 
 func NewDockerExecutor(storeCfg config.StoreConfig, imageCfg config.ImageConfig, execCfg config.ExecutorConfig) *DockerExecutor {
 	return &DockerExecutor{
-		resolver:     image.NewResolver(imageCfg),
-		runner:       &realDockerRunner{pullPolicy: imageCfg.PullPolicy, execCfg: execCfg},
-		logWriter:    logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
-		resultWriter: logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
+		resolver:          image.NewResolver(imageCfg),
+		runner:            &realDockerRunner{pullPolicy: imageCfg.PullPolicy, execCfg: execCfg},
+		logWriter:         logwriter.NewWriter(storeCfg.LogRoot, storeCfg.LogPathPattern),
+		resultWriter:      logwriter.NewResultWriter(storeCfg.ArtifactRoot, storeCfg.ResultPathPattern),
+		containerNameFunc: runnerContainerName,
 	}
 }
 
@@ -110,12 +114,17 @@ func (e *DockerExecutor) Execute(ctx context.Context, job *model.Job, run *model
 	}
 	defer resultFile.Close()
 
-	containerName := runnerContainerName(run.JobID, run.ID)
-	if err := e.runner.PrepareContainer(ctx, containerName); err != nil {
+	containerName := e.containerNameFunc
+	if containerName == nil {
+		containerName = runnerContainerName
+	}
+	name := containerName(run.JobID, run.ID)
+	log.Printf("docker executor start run=%d job=%d container=%s image=%s", run.ID, job.ID, name, pullRef)
+	if err := e.runner.PrepareContainer(ctx, name); err != nil {
 		return nil, err
 	}
 	spec := containerSpec{
-		Name:       containerName,
+		Name:       name,
 		JobID:      job.ID,
 		RunID:      run.ID,
 		ImageRef:   pullRef,
@@ -280,6 +289,8 @@ func (r *realDockerRunner) RunContainer(ctx context.Context, spec containerSpec,
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
+	log.Printf("docker container launch run=%d job=%d container=%s image=%s", spec.RunID, spec.JobID, spec.Name, spec.ImageRef)
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start docker run: %w", err)
 	}
@@ -291,6 +302,7 @@ func (r *realDockerRunner) RunContainer(ctx context.Context, spec containerSpec,
 
 	select {
 	case <-ctx.Done():
+		log.Printf("docker container stop requested run=%d job=%d container=%s", spec.RunID, spec.JobID, spec.Name)
 		stopCtx, cancelStop := context.WithTimeout(context.Background(), r.stopGracePeriod())
 		_ = exec.CommandContext(stopCtx, "docker", "stop", "-t", strconv.Itoa(r.stopGracePeriodSec()), spec.Name).Run()
 		cancelStop()
@@ -299,6 +311,11 @@ func (r *realDockerRunner) RunContainer(ctx context.Context, spec containerSpec,
 		_ = r.CleanupContainer(context.Background(), spec.Name)
 		return ctx.Err()
 	case err := <-waitCh:
+		if err != nil {
+			log.Printf("docker container exit run=%d job=%d container=%s err=%v", spec.RunID, spec.JobID, spec.Name, err)
+		} else {
+			log.Printf("docker container exit run=%d job=%d container=%s", spec.RunID, spec.JobID, spec.Name)
+		}
 		if cleanupErr := r.CleanupContainer(context.Background(), spec.Name); cleanupErr != nil {
 			if err != nil {
 				return errors.Join(err, fmt.Errorf("cleanup container %q: %w", spec.Name, cleanupErr))
@@ -362,7 +379,15 @@ func dockerRunArgs(spec containerSpec, execCfg config.ExecutorConfig) []string {
 }
 
 func runnerContainerName(jobID, runID int64) string {
-	return fmt.Sprintf("%s-%d-%d", containerNamePrefix, jobID, runID)
+	return runnerContainerNameWithSuffix(jobID, runID, uuid.NewString())
+}
+
+func runnerContainerNameWithSuffix(jobID, runID int64, suffix string) string {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		suffix = uuid.NewString()
+	}
+	return fmt.Sprintf("%s-%d-%d-%s", containerNamePrefix, jobID, runID, suffix)
 }
 
 func (e *DockerExecutor) writeResult(resultFile *os.File, record *logwriter.ResultRecord) error {

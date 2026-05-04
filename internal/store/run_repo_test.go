@@ -151,6 +151,48 @@ func TestRunRepoValidationFailures(t *testing.T) {
 	})
 }
 
+func TestRunRepoClaimPendingIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	st := newTestStore(t)
+	ctx := context.Background()
+	jobID := createTestJobForRun(t, st)
+	run := testRun(jobID)
+	run.Status = model.RunStatusPending
+	if _, err := st.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create pending: %v", err)
+	}
+
+	firstStarted := time.Date(2026, 4, 17, 12, 30, 0, 0, time.UTC)
+	ok, err := st.Runs.ClaimPending(ctx, run.ID, firstStarted)
+	if err != nil {
+		t.Fatalf("claim pending first: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected first claim to succeed")
+	}
+
+	secondStarted := firstStarted.Add(time.Minute)
+	ok, err = st.Runs.ClaimPending(ctx, run.ID, secondStarted)
+	if err != nil {
+		t.Fatalf("claim pending second: %v", err)
+	}
+	if ok {
+		t.Fatal("expected second claim to fail")
+	}
+
+	got, err := st.Runs.Get(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get claimed run: %v", err)
+	}
+	if got.Status != model.RunStatusRunning {
+		t.Fatalf("expected running status, got %s", got.Status)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(firstStarted) {
+		t.Fatalf("unexpected started_at: %+v", got.StartedAt)
+	}
+}
+
 func TestRunRepoPendingAndMissingRows(t *testing.T) {
 	t.Parallel()
 

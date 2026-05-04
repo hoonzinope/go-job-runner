@@ -26,6 +26,7 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 
 	startedAt := time.Now().UTC()
 	shouldStop := false
+	claimed := false
 	if err := s.store.WithinTx(ctx, func(tx *store.TxStore) error {
 		freshRun, err := tx.Runs.Get(ctx, runID)
 		if err != nil {
@@ -50,19 +51,23 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 			shouldStop = true
 			return err
 		case model.RunStatusPending:
-			run.StartedAt = &startedAt
-			if err := tx.Runs.UpdateStatus(ctx, runID, model.RunStatusRunning, &startedAt, nil, nil, nil); err != nil {
+			ok, err := tx.Runs.ClaimPending(ctx, runID, startedAt)
+			if err != nil {
 				return err
 			}
+			if !ok {
+				return nil
+			}
+			claimed = true
+			run.StartedAt = &startedAt
 			msg := "run started"
-			_, err := tx.Events.Create(ctx, &model.RunEvent{
+			_, err = tx.Events.Create(ctx, &model.RunEvent{
 				RunID:     runID,
 				EventType: model.RunEventTypeStarted,
 				Message:   &msg,
 			})
 			return err
 		case model.RunStatusRunning:
-			run.StartedAt = freshRun.StartedAt
 			return nil
 		default:
 			return nil
@@ -73,6 +78,10 @@ func (s *Scheduler) runWorker(ctx context.Context, runID int64) {
 	}
 
 	if shouldStop {
+		s.signalDispatch()
+		return
+	}
+	if !claimed {
 		s.signalDispatch()
 		return
 	}
