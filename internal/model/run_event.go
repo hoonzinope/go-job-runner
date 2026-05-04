@@ -8,6 +8,7 @@ const (
 	RunEventTypeCreated    RunEventType = "created"
 	RunEventTypeDispatched RunEventType = "dispatched"
 	RunEventTypeStarted    RunEventType = "started"
+	RunEventTypeSkipped    RunEventType = "skipped"
 	RunEventTypeCompleted  RunEventType = "completed"
 	RunEventTypeFailed     RunEventType = "failed"
 	RunEventTypeTimeout    RunEventType = "timeout"
@@ -16,7 +17,7 @@ const (
 
 func (t RunEventType) IsValid() bool {
 	switch t {
-	case RunEventTypeCreated, RunEventTypeDispatched, RunEventTypeStarted, RunEventTypeCompleted, RunEventTypeFailed, RunEventTypeTimeout, RunEventTypeCancelled:
+	case RunEventTypeCreated, RunEventTypeDispatched, RunEventTypeStarted, RunEventTypeSkipped, RunEventTypeCompleted, RunEventTypeFailed, RunEventTypeTimeout, RunEventTypeCancelled:
 		return true
 	default:
 		return false

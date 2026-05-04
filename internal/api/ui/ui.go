@@ -119,6 +119,7 @@ type runDetailPage struct {
 	LogContent    string
 	LogOffset     int64
 	LogSize       int
+	LogError      string
 	ResultContent string
 	CanCancel     bool
 }
@@ -518,12 +519,13 @@ func (u *UI) runDetail(c *gin.Context) {
 	logContent := ""
 	var logOffset int64
 	var logSize int
-	if run.LogPath != nil && *run.LogPath != "" {
-		if content, offset, size, err := u.runs.ReadLogs(c.Request.Context(), runID, u.reader, 0, 0, 8192); err == nil {
-			logContent = content
-			logOffset = offset
-			logSize = size
-		}
+	logError := ""
+	if content, offset, size, err := u.runs.ReadLogs(c.Request.Context(), runID, u.reader, 0, 0, 8192); err == nil {
+		logContent = content
+		logOffset = offset
+		logSize = size
+	} else {
+		logError = err.Error()
 	}
 
 	resultContent := ""
@@ -546,6 +548,7 @@ func (u *UI) runDetail(c *gin.Context) {
 		LogContent:    logContent,
 		LogOffset:     logOffset,
 		LogSize:       logSize,
+		LogError:      logError,
 		ResultContent: resultContent,
 		CanCancel:     run.Status == model.RunStatusPending || run.Status == model.RunStatusRunning || run.Status == model.RunStatusCancelling,
 	})

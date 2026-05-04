@@ -233,6 +233,29 @@ func TestUIRunRoutes(t *testing.T) {
 	assertContains(t, after.Body.String(), "cancelling")
 }
 
+func TestUIRunDetailShowsLogErrorWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	env := newUITestEnv(t)
+	job := seedUIJob(t, env.store, "missing-log-job")
+	run := &model.Run{
+		JobID:       job.ID,
+		ScheduledAt: time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC),
+		Status:      model.RunStatusSuccess,
+		Attempt:     0,
+	}
+	if _, err := env.store.Runs.Create(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	detail := doUIRequest(t, env.router, http.MethodGet, "/runs/"+intToString(run.ID), "", "")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("unexpected run detail status: %d body=%s", detail.Code, detail.Body.String())
+	}
+	assertContains(t, detail.Body.String(), "Log unavailable:")
+	assertContains(t, detail.Body.String(), "no log path recorded")
+}
+
 func newUITestEnv(t *testing.T) *uiTestEnv {
 	t.Helper()
 

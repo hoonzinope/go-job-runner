@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -66,6 +67,19 @@ func (s *Scheduler) processDueJob(ctx context.Context, job *model.Job, now time.
 				return err
 			}
 			if len(running) > 0 {
+				msg := fmt.Sprintf(
+					"scheduled run skipped: concurrency policy forbid and run %d is still running; next run advanced to %s",
+					running[0].ID,
+					nextRunAt.UTC().Format(time.RFC3339),
+				)
+				log.Printf("scheduler due-job skipped job=%d running_run=%d next_run_at=%s", job.ID, running[0].ID, nextRunAt.UTC().Format(time.RFC3339))
+				if _, err := tx.Events.Create(ctx, &model.RunEvent{
+					RunID:     running[0].ID,
+					EventType: model.RunEventTypeSkipped,
+					Message:   &msg,
+				}); err != nil {
+					return err
+				}
 				return tx.Jobs.UpdateScheduling(ctx, job.ID, &nextRunAt, scheduledAtPtr)
 			}
 		}

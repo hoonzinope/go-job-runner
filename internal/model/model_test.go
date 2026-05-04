@@ -118,6 +118,7 @@ func TestRunEventTypeIsValid(t *testing.T) {
 		{name: "created", value: RunEventTypeCreated, want: true},
 		{name: "dispatched", value: RunEventTypeDispatched, want: true},
 		{name: "started", value: RunEventTypeStarted, want: true},
+		{name: "skipped", value: RunEventTypeSkipped, want: true},
 		{name: "completed", value: RunEventTypeCompleted, want: true},
 		{name: "failed", value: RunEventTypeFailed, want: true},
 		{name: "timeout", value: RunEventTypeTimeout, want: true},

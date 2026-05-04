@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	logwriter "github.com/hoonzinope/go-job-runner/internal/log"
@@ -57,7 +58,7 @@ func (s *RunService) ReadLogs(ctx context.Context, runID int64, reader *logwrite
 		return "", 0, 0, err
 	}
 	if run.LogPath == nil || *run.LogPath == "" {
-		return "", 0, 0, nil
+		return "", 0, 0, fmt.Errorf("run %d has no log path recorded", runID)
 	}
 	return reader.ReadContent(*run.LogPath, offset, limit, tail)
 }

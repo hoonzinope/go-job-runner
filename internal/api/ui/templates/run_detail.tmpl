@@ -80,6 +80,11 @@
     <section class="card">
       <h2 class="section-title">Logs</h2>
       <p class="muted" style="margin: -6px 0 12px;">Streaming view of the captured log file. It refreshes while the run is active.</p>
+      {{ if .LogError }}
+      <div id="run-log-error" class="empty" style="margin-bottom: 8px;">Log unavailable: {{ .LogError }}</div>
+      {{ else }}
+      <div id="run-log-error" class="empty" style="display:none; margin-bottom: 8px;"></div>
+      {{ end }}
       {{ if .LogContent }}
       <div id="run-log-meta" class="muted" style="margin-bottom: 8px;">offset {{ .LogOffset }}, size {{ .LogSize }}</div>
       <pre id="run-log-content" class="code" data-run-id="{{ .Run.ID }}" data-run-status="{{ .Run.Status }}" data-log-offset="{{ .LogOffset }}" data-log-size="{{ .LogSize }}">{{ .LogContent }}</pre>
@@ -110,6 +115,7 @@
   var errorMessageEl = document.getElementById('run-error-message');
   var logPathEl = document.getElementById('run-log-path');
   var resultPathEl = document.getElementById('run-result-path');
+  var logErrorEl = document.getElementById('run-log-error');
   var logEl = document.getElementById('run-log-content');
   var logMetaEl = document.getElementById('run-log-meta');
   if (!statusEl || !logEl) return;
@@ -152,6 +158,12 @@
     if (run.resultPath !== undefined) resultPathEl.textContent = formatValue(run.resultPath);
   }
 
+  function clearLogError() {
+    if (!logErrorEl) return;
+    logErrorEl.textContent = '';
+    logErrorEl.style.display = 'none';
+  }
+
   async function refreshStatus() {
     var response = await fetch('/api/v1/runs/' + runId, { headers: { 'Accept': 'application/json' } });
     if (!response.ok) return null;
@@ -176,6 +188,7 @@
       if (!terminal[currentStatus]) {
         var log = await refreshLogs();
         if (log) {
+          clearLogError();
           if (typeof log.content === 'string' && log.content.length > 0) {
             logEl.textContent += log.content;
             if (logMetaEl) {

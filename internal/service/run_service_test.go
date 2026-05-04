@@ -112,3 +112,29 @@ func TestRunServiceReadLogsAndResultPath(t *testing.T) {
 		t.Fatalf("unexpected result path: %+v", gotPath)
 	}
 }
+
+func TestRunServiceReadLogsMissingPath(t *testing.T) {
+	t.Parallel()
+
+	st := openServiceTestStore(t)
+	svc := NewRunService(st)
+
+	job := baseIntervalJob("artifact-job-missing-log", 60)
+	if _, err := st.Jobs.Create(context.Background(), job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	run := &model.Run{
+		JobID:       job.ID,
+		ScheduledAt: time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC),
+		Status:      model.RunStatusSuccess,
+		Attempt:     0,
+	}
+	if _, err := st.Runs.Create(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if _, _, _, err := svc.ReadLogs(context.Background(), run.ID, logwriter.NewReader(), 0, 0, 0); err == nil {
+		t.Fatal("expected missing log path error")
+	}
+}

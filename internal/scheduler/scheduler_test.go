@@ -121,6 +121,47 @@ func TestProcessDueJobCreatesRunAndAdvancesSchedule(t *testing.T) {
 	}
 }
 
+func TestProcessDueJobSkipsRunningJobAndRecordsEvent(t *testing.T) {
+	t.Parallel()
+
+	st := openSchedulerTestStore(t)
+	job := createScheduledJob(t, st, 0, model.ConcurrencyPolicyForbid)
+	running := &model.Run{
+		JobID:       job.ID,
+		ScheduledAt: *job.NextRunAt,
+		Status:      model.RunStatusRunning,
+		Attempt:     0,
+	}
+	if _, err := st.Runs.Create(context.Background(), running); err != nil {
+		t.Fatalf("create running run: %v", err)
+	}
+
+	s := newTestScheduler(st)
+	now := time.Date(2026, time.April, 17, 12, 0, 0, 0, time.UTC)
+	if err := s.processDueJob(context.Background(), job, now); err != nil {
+		t.Fatalf("process due job: %v", err)
+	}
+
+	runs, total, err := st.Runs.List(context.Background(), store.RunFilter{JobID: &job.ID}, store.Page{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if total != 1 || len(runs) != 1 {
+		t.Fatalf("expected only existing run, got total=%d len=%d", total, len(runs))
+	}
+
+	events, err := st.Events.ListByRun(context.Background(), running.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != model.RunEventTypeSkipped {
+		t.Fatalf("expected skipped event, got %+v", events)
+	}
+	if events[0].Message == nil || *events[0].Message == "" {
+		t.Fatalf("expected skipped event message, got %+v", events[0])
+	}
+}
+
 func TestProcessDueJobSkipsRunWhenRunningAndConcurrencyForbid(t *testing.T) {
 	t.Parallel()
 
