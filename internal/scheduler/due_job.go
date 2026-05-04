@@ -62,17 +62,29 @@ func (s *Scheduler) processDueJob(ctx context.Context, job *model.Job, now time.
 			running, _, err := tx.Runs.List(ctx, store.RunFilter{
 				JobID:  &job.ID,
 				Status: runStatusPtr(model.RunStatusRunning),
-			}, store.Page{Page: 1, Size: 1})
+			}, store.Page{Page: 1, Size: 100})
 			if err != nil {
 				return err
 			}
-			if len(running) > 0 {
+
+			activeRunning := make([]model.Run, 0, len(running))
+			for i := range running {
+				if s.isRunningRunStale(&running[i], now, job.TimeoutSec) {
+					if err := s.finalizeStaleRunningRun(ctx, tx, &running[i], now, job.TimeoutSec); err != nil {
+						return err
+					}
+					continue
+				}
+				activeRunning = append(activeRunning, running[i])
+			}
+
+			if len(activeRunning) > 0 {
 				msg := fmt.Sprintf(
 					"scheduled run skipped: concurrency policy forbid and run %d is still running; next run advanced to %s",
-					running[0].ID,
+					activeRunning[0].ID,
 					nextRunAt.UTC().Format(time.RFC3339),
 				)
-				log.Printf("scheduler due-job skipped job=%d running_run=%d next_run_at=%s", job.ID, running[0].ID, nextRunAt.UTC().Format(time.RFC3339))
+				log.Printf("scheduler due-job skipped job=%d running_run=%d next_run_at=%s", job.ID, activeRunning[0].ID, nextRunAt.UTC().Format(time.RFC3339))
 				skippedRun := &model.Run{
 					JobID:        job.ID,
 					ScheduledAt:  scheduledAt,
@@ -147,4 +159,57 @@ func computeNextRunAt(job *model.Job, from time.Time) (time.Time, error) {
 
 func runStatusPtr(status model.RunStatus) *model.RunStatus {
 	return &status
+}
+
+func (s *Scheduler) isRunningRunStale(run *model.Run, now time.Time, timeoutSec int) bool {
+	if run == nil {
+		return false
+	}
+	timeoutSec = s.effectiveTimeoutSec(timeoutSec)
+	if timeoutSec <= 0 {
+		return false
+	}
+
+	startedAt := run.StartedAt
+	if startedAt == nil || startedAt.IsZero() {
+		if run.CreatedAt.IsZero() {
+			return false
+		}
+		startedAt = &run.CreatedAt
+	}
+
+	return now.Sub(*startedAt) >= time.Duration(timeoutSec)*time.Second
+}
+
+func (s *Scheduler) finalizeStaleRunningRun(ctx context.Context, tx *store.TxStore, run *model.Run, now time.Time, timeoutSec int) error {
+	if run == nil {
+		return nil
+	}
+	timeoutSec = s.effectiveTimeoutSec(timeoutSec)
+	startedAt := run.StartedAt
+	if startedAt == nil || startedAt.IsZero() {
+		startedAt = &run.CreatedAt
+	}
+	finishedAt := now.UTC()
+	exitCode := -1
+	msg := fmt.Sprintf(
+		"stale running run discarded after %d seconds without a status update",
+		timeoutSec,
+	)
+	log.Printf(
+		"scheduler stale-running timeout job=%d run=%d started_at=%s timeout_sec=%d",
+		run.JobID,
+		run.ID,
+		startedAt.UTC().Format(time.RFC3339),
+		timeoutSec,
+	)
+	if err := tx.Runs.UpdateStatus(ctx, run.ID, model.RunStatusTimeout, startedAt, &finishedAt, &exitCode, &msg); err != nil {
+		return err
+	}
+	_, err := tx.Events.Create(ctx, &model.RunEvent{
+		RunID:     run.ID,
+		EventType: model.RunEventTypeTimeout,
+		Message:   &msg,
+	})
+	return err
 }

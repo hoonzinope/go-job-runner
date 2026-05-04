@@ -216,6 +216,66 @@ func TestProcessDueJobSkipsRunWhenRunningAndConcurrencyForbid(t *testing.T) {
 	}
 }
 
+func TestProcessDueJobReclaimsStaleRunningRun(t *testing.T) {
+	t.Parallel()
+
+	st := openSchedulerTestStore(t)
+	job := createScheduledJob(t, st, 0, model.ConcurrencyPolicyForbid)
+	now := time.Date(2026, time.April, 17, 12, 0, 0, 0, time.UTC)
+	staleStarted := now.Add(-2 * time.Hour)
+	running := &model.Run{
+		JobID:       job.ID,
+		ScheduledAt: now.Add(-time.Minute),
+		StartedAt:   &staleStarted,
+		Status:      model.RunStatusRunning,
+		Attempt:     0,
+	}
+	if _, err := st.Runs.Create(context.Background(), running); err != nil {
+		t.Fatalf("create running run: %v", err)
+	}
+
+	s := newTestScheduler(st)
+	if err := s.processDueJob(context.Background(), job, now); err != nil {
+		t.Fatalf("process due job: %v", err)
+	}
+
+	runs, total, err := st.Runs.List(context.Background(), store.RunFilter{JobID: &job.ID}, store.Page{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if total != 2 || len(runs) != 2 {
+		t.Fatalf("expected stale timeout and new pending run, got total=%d len=%d", total, len(runs))
+	}
+
+	var timedOut *model.Run
+	var pending *model.Run
+	for i := range runs {
+		switch runs[i].Status {
+		case model.RunStatusTimeout:
+			timedOut = &runs[i]
+		case model.RunStatusPending:
+			pending = &runs[i]
+		}
+	}
+	if timedOut == nil || pending == nil {
+		t.Fatalf("expected timeout and pending runs, got %+v", runs)
+	}
+	if timedOut.FinishedAt == nil || timedOut.ErrorMessage == nil || *timedOut.ErrorMessage == "" {
+		t.Fatalf("expected timed out run to be finalized, got %+v", timedOut)
+	}
+	if pending.Attempt != 0 {
+		t.Fatalf("expected fresh pending run attempt 0, got %+v", pending)
+	}
+
+	events, err := st.Events.ListByRun(context.Background(), timedOut.ID)
+	if err != nil {
+		t.Fatalf("list timed out run events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != model.RunEventTypeTimeout {
+		t.Fatalf("expected timeout event on stale run, got %+v", events)
+	}
+}
+
 func TestRunWorkerTransitionsSuccess(t *testing.T) {
 	t.Parallel()
 

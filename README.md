@@ -37,7 +37,7 @@ Schedule Docker image workloads on cron or interval schedules. Tracks run histor
 ## Features
 
 - **Cron & interval schedules** — standard cron expressions or fixed-second intervals with timezone support
-- **Concurrency policy** — `allow` (run in parallel) or `forbid` (skip if already running)
+- **Concurrency policy** — `allow` (run in parallel) or `forbid` (skip if already running; stale `running` rows past the effective timeout are auto-closed so the schedule can recover)
 - **Retry & timeout** — configurable per-job retry limit and execution timeout
 - **Persistent run history** — every run, event, log, and artifact is stored locally via SQLite
 - **Web UI** — browse jobs and runs, view logs, trigger/cancel runs from the browser
