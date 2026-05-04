@@ -256,6 +256,31 @@ func TestUIRunDetailShowsLogErrorWhenMissing(t *testing.T) {
 	assertContains(t, detail.Body.String(), "no log path recorded")
 }
 
+func TestUIJobDetailShowsSkippedRunInRecentRuns(t *testing.T) {
+	t.Parallel()
+
+	env := newUITestEnv(t)
+	job := seedUIJob(t, env.store, "skipped-job")
+	finishedAt := time.Date(2026, 4, 17, 12, 5, 0, 0, time.UTC)
+	run := &model.Run{
+		JobID:        job.ID,
+		ScheduledAt:  finishedAt.Add(-time.Minute),
+		FinishedAt:   &finishedAt,
+		Status:       model.RunStatusSkipped,
+		Attempt:      0,
+		ErrorMessage: stringPtr("scheduled run skipped: concurrency policy forbid and run 1 is still running"),
+	}
+	if _, err := env.store.Runs.Create(context.Background(), run); err != nil {
+		t.Fatalf("create skipped run: %v", err)
+	}
+
+	page := doUIRequest(t, env.router, http.MethodGet, "/jobs/"+intToString(job.ID), "", "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("unexpected job detail status: %d body=%s", page.Code, page.Body.String())
+	}
+	assertContains(t, page.Body.String(), "skipped")
+}
+
 func newUITestEnv(t *testing.T) *uiTestEnv {
 	t.Helper()
 
@@ -358,6 +383,10 @@ func boolPtrEqual(a, b *bool) bool {
 }
 
 func intPtr(v int) *int {
+	return &v
+}
+
+func stringPtr(v string) *string {
 	return &v
 }
 

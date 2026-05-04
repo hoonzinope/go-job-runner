@@ -253,18 +253,12 @@ func (r *RunRepo) ListPending(ctx context.Context, limit int) ([]model.Run, erro
 
 func (r *RunRepo) ListTerminalBefore(ctx context.Context, before time.Time, page Page) ([]model.Run, int64, error) {
 	limit, offset := page.normalize()
-	args := []any{
-		string(model.RunStatusSuccess),
-		string(model.RunStatusFailed),
-		string(model.RunStatusTimeout),
-		string(model.RunStatusCancelled),
-		encodeTime(before),
-	}
+	args := terminalRunStatusArgs(before)
 
 	var total int64
 	if err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runs
-		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+		WHERE status IN (?, ?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
 	`, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count terminal runs before cutoff: %w", err)
 	}
@@ -273,7 +267,7 @@ func (r *RunRepo) ListTerminalBefore(ctx context.Context, before time.Time, page
 		SELECT id, job_id, scheduled_at, started_at, finished_at, status, attempt,
 			exit_code, error_message, log_path, result_path, created_at, updated_at
 		FROM runs
-		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+		WHERE status IN (?, ?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
 		ORDER BY finished_at ASC, id ASC
 		LIMIT ? OFFSET ?
 	`, append(args, limit, offset)...)
@@ -299,8 +293,8 @@ func (r *RunRepo) ListTerminalBefore(ctx context.Context, before time.Time, page
 func (r *RunRepo) DeleteTerminalBefore(ctx context.Context, before time.Time) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
 		DELETE FROM runs
-		WHERE status IN (?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
-	`, string(model.RunStatusSuccess), string(model.RunStatusFailed), string(model.RunStatusTimeout), string(model.RunStatusCancelled), encodeTime(before))
+		WHERE status IN (?, ?, ?, ?, ?) AND finished_at IS NOT NULL AND finished_at < ?
+	`, string(model.RunStatusSuccess), string(model.RunStatusFailed), string(model.RunStatusTimeout), string(model.RunStatusCancelled), string(model.RunStatusSkipped), encodeTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("delete terminal runs before cutoff: %w", err)
 	}
@@ -309,6 +303,17 @@ func (r *RunRepo) DeleteTerminalBefore(ctx context.Context, before time.Time) (i
 		return 0, fmt.Errorf("terminal runs delete affected rows: %w", err)
 	}
 	return count, nil
+}
+
+func terminalRunStatusArgs(before time.Time) []any {
+	return []any{
+		string(model.RunStatusSuccess),
+		string(model.RunStatusFailed),
+		string(model.RunStatusTimeout),
+		string(model.RunStatusCancelled),
+		string(model.RunStatusSkipped),
+		encodeTime(before),
+	}
 }
 
 func scanRun(scanner interface{ Scan(...any) error }) (*model.Run, error) {

@@ -147,7 +147,7 @@ func TestSchedulerScenarioForbidConcurrencySkipsDueRun(t *testing.T) {
 	job := createScheduledJob(t, st, 0, model.ConcurrencyPolicyForbid)
 	running := &model.Run{
 		JobID:       job.ID,
-		ScheduledAt: *job.NextRunAt,
+		ScheduledAt: (*job.NextRunAt).Add(-90 * time.Second),
 		Status:      model.RunStatusRunning,
 		Attempt:     0,
 	}
@@ -162,8 +162,11 @@ func TestSchedulerScenarioForbidConcurrencySkipsDueRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if total != 1 || len(runs) != 1 {
-		t.Fatalf("expected only existing run, got total=%d len=%d", total, len(runs))
+	if total != 2 || len(runs) != 2 {
+		t.Fatalf("expected running run and skipped run, got total=%d len=%d", total, len(runs))
+	}
+	if runs[0].Status != model.RunStatusSkipped && runs[1].Status != model.RunStatusSkipped {
+		t.Fatalf("expected skipped run in recent runs, got %+v", runs)
 	}
 
 	updatedJob, err := st.Jobs.Get(context.Background(), job.ID)

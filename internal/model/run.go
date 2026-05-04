@@ -12,11 +12,12 @@ const (
 	RunStatusFailed     RunStatus = "failed"
 	RunStatusTimeout    RunStatus = "timeout"
 	RunStatusCancelled  RunStatus = "cancelled"
+	RunStatusSkipped    RunStatus = "skipped"
 )
 
 func (s RunStatus) IsValid() bool {
 	switch s {
-	case RunStatusPending, RunStatusRunning, RunStatusCancelling, RunStatusSuccess, RunStatusFailed, RunStatusTimeout, RunStatusCancelled:
+	case RunStatusPending, RunStatusRunning, RunStatusCancelling, RunStatusSuccess, RunStatusFailed, RunStatusTimeout, RunStatusCancelled, RunStatusSkipped:
 		return true
 	default:
 		return false

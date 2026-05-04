@@ -93,6 +93,7 @@ func TestRunStatusIsValid(t *testing.T) {
 		{name: "failed", value: RunStatusFailed, want: true},
 		{name: "timeout", value: RunStatusTimeout, want: true},
 		{name: "cancelled", value: RunStatusCancelled, want: true},
+		{name: "skipped", value: RunStatusSkipped, want: true},
 		{name: "invalid", value: RunStatus("bad"), want: false},
 	}
 

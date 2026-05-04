@@ -304,6 +304,38 @@ func TestRunRepoListFiltersAndEmptyResult(t *testing.T) {
 	}
 }
 
+func TestRunRepoListTerminalBeforeIncludesSkipped(t *testing.T) {
+	t.Parallel()
+
+	st := newTestStore(t)
+	ctx := context.Background()
+	jobID := createTestJobForRun(t, st)
+	finishedAt := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
+	run := testRun(jobID)
+	run.Status = model.RunStatusSkipped
+	run.ScheduledAt = finishedAt.Add(-time.Minute)
+	run.FinishedAt = &finishedAt
+	if _, err := st.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("create skipped run: %v", err)
+	}
+
+	items, total, err := st.Runs.ListTerminalBefore(ctx, finishedAt.Add(time.Minute), Page{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("list terminal before: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Status != model.RunStatusSkipped {
+		t.Fatalf("expected skipped run in terminal list, got total=%d items=%+v", total, items)
+	}
+
+	deleted, err := st.Runs.DeleteTerminalBefore(ctx, finishedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("delete terminal before: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected skipped run to be deleted, got %d", deleted)
+	}
+}
+
 func TestRunRepoUpdateStatusClearsNullableFields(t *testing.T) {
 	t.Parallel()
 

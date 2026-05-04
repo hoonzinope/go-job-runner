@@ -73,8 +73,19 @@ func (s *Scheduler) processDueJob(ctx context.Context, job *model.Job, now time.
 					nextRunAt.UTC().Format(time.RFC3339),
 				)
 				log.Printf("scheduler due-job skipped job=%d running_run=%d next_run_at=%s", job.ID, running[0].ID, nextRunAt.UTC().Format(time.RFC3339))
+				skippedRun := &model.Run{
+					JobID:        job.ID,
+					ScheduledAt:  scheduledAt,
+					FinishedAt:   &now,
+					Status:       model.RunStatusSkipped,
+					Attempt:      0,
+					ErrorMessage: &msg,
+				}
+				if _, err := tx.Runs.Create(ctx, skippedRun); err != nil {
+					return err
+				}
 				if _, err := tx.Events.Create(ctx, &model.RunEvent{
-					RunID:     running[0].ID,
+					RunID:     skippedRun.ID,
 					EventType: model.RunEventTypeSkipped,
 					Message:   &msg,
 				}); err != nil {

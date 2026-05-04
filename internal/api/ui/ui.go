@@ -188,7 +188,7 @@ func New(jobs *service.JobService, runs *service.RunService, resolver *image.Res
 				return "status status-failed"
 			case model.RunStatusRunning, model.RunStatusPending, model.RunStatusCancelling:
 				return "status status-warn"
-			case model.RunStatusCancelled:
+			case model.RunStatusCancelled, model.RunStatusSkipped:
 				return "status status-muted"
 			default:
 				return "status"

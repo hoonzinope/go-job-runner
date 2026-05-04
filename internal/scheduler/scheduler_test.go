@@ -128,7 +128,7 @@ func TestProcessDueJobSkipsRunningJobAndRecordsEvent(t *testing.T) {
 	job := createScheduledJob(t, st, 0, model.ConcurrencyPolicyForbid)
 	running := &model.Run{
 		JobID:       job.ID,
-		ScheduledAt: *job.NextRunAt,
+		ScheduledAt: (*job.NextRunAt).Add(-90 * time.Second),
 		Status:      model.RunStatusRunning,
 		Attempt:     0,
 	}
@@ -146,16 +146,30 @@ func TestProcessDueJobSkipsRunningJobAndRecordsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if total != 1 || len(runs) != 1 {
-		t.Fatalf("expected only existing run, got total=%d len=%d", total, len(runs))
+	if total != 2 || len(runs) != 2 {
+		t.Fatalf("expected running run and skipped run, got total=%d len=%d", total, len(runs))
 	}
 
-	events, err := st.Events.ListByRun(context.Background(), running.ID)
+	var skipped *model.Run
+	for i := range runs {
+		if runs[i].Status == model.RunStatusSkipped {
+			skipped = &runs[i]
+			break
+		}
+	}
+	if skipped == nil {
+		t.Fatalf("expected skipped run in recent runs: %+v", runs)
+	}
+	if skipped.FinishedAt == nil || skipped.ErrorMessage == nil || *skipped.ErrorMessage == "" {
+		t.Fatalf("expected skipped run to carry finish time and reason: %+v", skipped)
+	}
+
+	events, err := st.Events.ListByRun(context.Background(), skipped.ID)
 	if err != nil {
-		t.Fatalf("list events: %v", err)
+		t.Fatalf("list skipped run events: %v", err)
 	}
 	if len(events) != 1 || events[0].EventType != model.RunEventTypeSkipped {
-		t.Fatalf("expected skipped event, got %+v", events)
+		t.Fatalf("expected skipped event on skipped run, got %+v", events)
 	}
 	if events[0].Message == nil || *events[0].Message == "" {
 		t.Fatalf("expected skipped event message, got %+v", events[0])
@@ -169,7 +183,7 @@ func TestProcessDueJobSkipsRunWhenRunningAndConcurrencyForbid(t *testing.T) {
 	job := createScheduledJob(t, st, 0, model.ConcurrencyPolicyForbid)
 	running := &model.Run{
 		JobID:       job.ID,
-		ScheduledAt: *job.NextRunAt,
+		ScheduledAt: (*job.NextRunAt).Add(-90 * time.Second),
 		Status:      model.RunStatusRunning,
 		Attempt:     0,
 	}
@@ -186,8 +200,11 @@ func TestProcessDueJobSkipsRunWhenRunningAndConcurrencyForbid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if total != 1 || len(runs) != 1 {
-		t.Fatalf("expected only existing running run, got total=%d len=%d", total, len(runs))
+	if total != 2 || len(runs) != 2 {
+		t.Fatalf("expected running run and skipped run, got total=%d len=%d", total, len(runs))
+	}
+	if runs[0].Status != model.RunStatusSkipped && runs[1].Status != model.RunStatusSkipped {
+		t.Fatalf("expected skipped run in recent runs, got %+v", runs)
 	}
 
 	updatedJob, err := st.Jobs.Get(context.Background(), job.ID)

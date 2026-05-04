@@ -26,6 +26,7 @@
         <option value="failed" {{ if eq .Filter.Status "failed" }}selected{{ end }}>failed</option>
         <option value="timeout" {{ if eq .Filter.Status "timeout" }}selected{{ end }}>timeout</option>
         <option value="cancelled" {{ if eq .Filter.Status "cancelled" }}selected{{ end }}>cancelled</option>
+        <option value="skipped" {{ if eq .Filter.Status "skipped" }}selected{{ end }}>skipped</option>
       </select>
     </div>
     <div class="field">
